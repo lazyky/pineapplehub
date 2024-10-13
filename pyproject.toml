@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "pineapplehub"
+version = "0.1.0"
+description = ""
+authors = ["Yu Sun <ysun@sctmes.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+opencv-python = "^4.10"
+nicegui = "^2.3"
+pillow = "^10.4"
+scipy = "^1.14"
+
+[[tool.poetry.source]]
+name = "ustc"
+url = "https://mirrors.ustc.edu.cn/pypi/simple"
+priority = "primary"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

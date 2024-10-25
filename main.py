@@ -331,14 +331,6 @@ def clear_all():
     finally:
         uploader.clear()
 
-
-with ui.header(elevated=True).style("background-color: #3874c8").classes(
-    "items-center justify-between"
-):
-    ui.label("Pineapple Hub")
-    ui.space()
-    ui.link("🚨", "https://git.bigdick.live/ysun/pineapplehub/issues/new")
-
 with ui.left_drawer(top_corner=True, bottom_corner=True):
     ui.label("Please pick the pineapple image:")
     uploader = ui.upload(on_upload=handle_upload).classes("max-w-full")
@@ -348,27 +340,45 @@ with ui.left_drawer(top_corner=True, bottom_corner=True):
     ui.button("Compute", on_click=lambda e: handle_compute(e.sender))
     reset_button = ui.button("Reset", on_click=clear_all)
 
-with ui.stepper().props("vertical header-nav").bind_visibility_from(
-    details_switch, "value"
-) as stepper:
-    with ui.step("Gray"):
-        ui.label("Transform the image to gray")
-    with ui.step("Smoothing"):
-        ui.label("Smooth the image")
-    with ui.step("Binary"):
-        ui.label("Transform to binary")
-    with ui.step("Closing"):
-        ui.label("Morphological closing")
-    with ui.step("Opening"):
-        ui.label("Morphological opening")
-    with ui.step("Scaling"):
-        ui.label("Find the scaler")
-    with ui.step("Contour"):
-        ui.label("Find the longest contour")
-    with ui.step("Fitting"):
-        ui.label(
-            "Fit minimal rectangle and its inscribed ellipse on the longest contour"
-        )
+with ui.row():
+    with ui.stepper().props("vertical header-nav").bind_visibility_from(
+        details_switch, "value"
+    ) as stepper:
+        with ui.step("Gray"):
+            ui.label("Transform the image to gray")
+        with ui.step("Smoothing"):
+            ui.label("Smooth the image")
+        with ui.step("Binary"):
+            ui.label("Transform to binary")
+        with ui.step("Closing"):
+            ui.label("Morphological closing")
+        with ui.step("Opening"):
+            ui.label("Morphological opening")
+        with ui.step("Scaling"):
+            ui.label("Find the scaler")
+        with ui.step("Contour"):
+            ui.label("Find the longest contour")
+        with ui.step("Fitting"):
+            ui.label(
+                "Fit minimal rectangle and its inscribed ellipse on the longest contour"
+            )
+    
+    with open('doc.md', 'r') as f:
+        doc = f.read()
+    ui.markdown(doc)
+
+with ui.header(elevated=True).style("background-color: #3874c8").classes(
+    "items-center justify-between"
+):
+    ui.label("Pineapple Hub")
+    ui.space()
+    ui.button('Change Log', on_click=lambda: right_drawer.toggle(), icon='timeline').props('flat color=white')
+    ui.button('BUG REPORT', icon='bug_report', on_click=lambda: ui.navigate.to('https://git.bigdick.live/ysun/pineapplehub/issues/new')).props('flat color=white')
+
+with ui.right_drawer(fixed=False).style('background-color: #ebf1fa').props('bordered') as right_drawer:
+    with open('CHANGELOG.md', 'r') as f:
+        changelog = f.read()
+    ui.markdown(changelog)
 
 with ui.dialog().props("full-width") as dialog:
     with ui.card():

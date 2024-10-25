@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pineapplehub"
-version = "0.1.0"
+version = "1.0.0"
 description = ""
 authors = ["Yu Sun <ysun@sctmes.com>"]
 readme = "README.md"

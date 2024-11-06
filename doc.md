@@ -18,5 +18,5 @@ Please follow the steps:
 ## ❗ Known issues
 
 - For images with more than one pineapple, only **the largest one** will be recognized
-- Sometimes the UI may be blocked
+- Sometimes the UI may be blocked: **please press <kbd>RESET</kbd> and try again**
 - The app will not work under extremely slow network (see [#6](https://git.bigdick.live/ysun/pineapplehub/issues/6))

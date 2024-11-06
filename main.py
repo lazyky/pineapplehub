@@ -3,18 +3,24 @@
 from multiprocessing import Manager, Queue
 from pineapplehub.calc import (
     distance_to_major_axis,
-    calc_area,
+    calc_volume,
     connect_contours,
     detect_circle,
     remove_hypotenuse,
+    get_new_width,
 )
 import cv2
 import numpy as np
 from nicegui import run, ui
-from PIL import Image
+from PIL import Image, ExifTags
 import math
-from scipy.integrate import quad
 from contextlib import contextmanager
+from io import BytesIO
+import time
+import copy
+from pineapplehub.exif import ImageWithExif
+from pineapplehub.ui import TABLE_COLUMNS
+from pineapplehub.result import Result
 
 ui.add_body_html(
     """
@@ -118,8 +124,8 @@ def resize_img(arr, to_rgb=False) -> Image:
     return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
 
-def compute(img, q):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+def compute(inputs: ImageWithExif, q):
+    gray = cv2.cvtColor(inputs.img, cv2.COLOR_BGR2GRAY)
     q.put(resize_img(gray))
     q.put(None)
 
@@ -146,7 +152,7 @@ def compute(img, q):
     q.put(Image.fromarray(opened))
     q.put(None)
 
-    restored = cv2.resize(opened, dsize=(img.shape[1], img.shape[0]))
+    restored = cv2.resize(opened, dsize=(inputs.img.shape[1], inputs.img.shape[0]))
 
     contours, _ = cv2.findContours(restored, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -165,23 +171,32 @@ def compute(img, q):
     (x, y), radius = cv2.minEnclosingCircle(contour)
     center = (int(x), int(y))
     radius = int(radius)
-    cv2.circle(img, center, radius, (0, 255, 0), 5)
+    cv2.circle(inputs.img, center, radius, (0, 255, 0), 5)
 
-    factor = 25 / diameter
-
-    q.put(resize_img(img, True))
+    q.put(resize_img(inputs.img, True))
     q.put(None)
 
     contours, _ = cv2.findContours(restored, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     longest_contour = max(remove_hypotenuse(contours), key=cv2.contourArea)
-    cv2.drawContours(img, longest_contour, -1, (0, 255, 0), 3)
-    q.put(resize_img(img, to_rgb=True))
+    cv2.drawContours(inputs.img, longest_contour, -1, (0, 255, 0), 3)
+    q.put(resize_img(inputs.img, to_rgb=True))
     q.put(None)
 
     rect = cv2.minAreaRect(longest_contour)
     (center_x, center_y), (width, height), angle = rect
 
     axes = (int(max(width, height) / 2), int(min(width, height) / 2))
+
+    raw_factor = 25 / diameter
+
+    corrected_factor = 25 / get_new_width(
+        inputs.focal_length,
+        25,
+        inputs.pixel_x_dimension,
+        diameter,
+        inputs.get_sensor_width_mm(),
+        axes[1],
+    )
 
     if width < height:
         angle -= 90
@@ -190,7 +205,7 @@ def compute(img, q):
         angle = 180 - angle
 
     center = (int(center_x), int(center_y))
-    cv2.ellipse(img, center, axes, angle, 0, 360, (0, 255, 0), 2)
+    cv2.ellipse(inputs.img, center, axes, angle, 0, 360, (0, 255, 0), 2)
 
     long_axis_direction = np.array([width, 0]).reshape((2, 1)) / np.linalg.norm(width)
     valid_points = []
@@ -218,31 +233,30 @@ def compute(img, q):
         if angle_with_long_axis <= np.pi / 2:
             valid_points.append(point[0])
 
-    distances = (
-        np.sort(
-            [
-                distance_to_major_axis(point, (center_x, center_y), angle)
-                for point in valid_points
-            ]
-        )
-        * factor
-    )
-    integrals = np.array(
+    distances_pixels = np.sort(
         [
-            quad(calc_area, distances[i], distances[i + 1])[0]
-            for i in range(len(distances) - 1)
+            distance_to_major_axis(point, (center_x, center_y), angle)
+            for point in valid_points
         ]
     )
 
-    total_integral = np.sum(integrals)
+    raw_distances = distances_pixels * raw_factor
+    corrected_distances = distances_pixels * corrected_factor
 
     box = cv2.boxPoints(rect)
     box = np.int_(box)
 
-    cv2.drawContours(img, [box], 0, (0, 255, 0), 2)
-    q.put(resize_img(img, to_rgb=True))
+    cv2.drawContours(inputs.img, [box], 0, (0, 255, 0), 2)
+    q.put(resize_img(inputs.img, to_rgb=True))
 
-    return width * factor, height * factor, total_integral
+    return (
+        Result(width * raw_factor, height * raw_factor, calc_volume(raw_distances)),
+        Result(
+            width * corrected_factor,
+            height * corrected_factor,
+            calc_volume(corrected_distances),
+        ),
+    )
 
 
 async def handle_upload(e):
@@ -257,20 +271,40 @@ async def handle_upload(e):
                 clear_all()
             else:
                 ui.notify("User canceled.")
+                return
 
-    global input_img
+    global inputs
 
-    ui.notify(f"Uploaded {e.name}")
-    input_img = cv2.imdecode(
-        np.frombuffer(e.content.read(), np.uint8), cv2.IMREAD_COLOR
-    )
+    buffer = e.content.read()
+
+    exif = Image.open(BytesIO(buffer)).getexif()
+    exif_ifd = exif.get_ifd(ExifTags.IFD.Exif)
+
+    try:
+        inputs = ImageWithExif(
+            cv2.imdecode(np.frombuffer(buffer, np.uint8), cv2.IMREAD_COLOR),
+            exif_ifd[ExifTags.Base.FocalLength],
+            exif_ifd[ExifTags.Base.ExifImageWidth],
+            exif_ifd[ExifTags.Base.FocalPlaneXResolution],
+        )
+    except KeyError:
+        ui.notify(
+            "Missing EXIF! Do NOT edit the photo by yourself.",
+            close_button="GOT",
+            type="negative",
+        )
+        e.sender.reset()
+    else:
+        ui.notify(f"Uploaded {e.name}")
 
 
-rows = [
+raw_rows = [
     {"parameter": "Major length (mm)", "value": None},
     {"parameter": "Minor length (mm)", "value": None},
     {"parameter": "Volume (mm^3)", "value": None},
 ]
+
+corrected_rows = copy.deepcopy(raw_rows)
 
 
 @contextmanager
@@ -284,9 +318,9 @@ def disable(button: ui.button):
 
 async def handle_compute(button: ui.button):
     global table
-    
+
     try:
-        input_img
+        inputs
     except NameError:
         ui.notify("The image file must be uploaded", type="negative")
         return
@@ -299,28 +333,23 @@ async def handle_compute(button: ui.button):
         with disable(button):
             reset_button.disable()
             try:
-                width, height, volume = await run.cpu_bound(compute, input_img, queue)
+                raw_results, corrected_results = await run.cpu_bound(
+                    compute, inputs, queue
+                )
             except Exception as e:
                 ui.notify(e, close_button="GOT", type="negative")
             else:
-                rows[0]["value"] = width
-                rows[1]["value"] = height
-                rows[2]["value"] = volume
+                raw_rows[0]["value"] = raw_results.major
+                raw_rows[1]["value"] = raw_results.minor
+                raw_rows[2]["value"] = raw_results.volume
 
-                table = ui.table(
-                    columns=[
-                        {
-                            "name": "parameter",
-                            "label": "Parameter",
-                            "field": "parameter",
-                            "align": "left",
-                        },
-                        {"name": "value", "label": "Value", "field": "value"},
-                    ],
-                    rows=rows,
-                    row_key="parameter",
-                )
+                corrected_rows[0]["value"] = corrected_results.major
+                corrected_rows[1]["value"] = corrected_results.minor
+                corrected_rows[2]["value"] = corrected_results.volume
+
             finally:
+                # To wait job in timer finished
+                time.sleep(1)
                 details_switch.set_value(origin_detail_status)
                 reset_button.enable()
 
@@ -373,9 +402,24 @@ with ui.row():
         with ui.step("Contour"):
             ui.label("Find the longest contour")
         with ui.step("Fitting"):
-            ui.label(
-                "Fit minimal rectangle and its inscribed ellipse on the longest contour"
+            ui.markdown(
+                "Fit minimal rectangle<br/>and its inscribed ellipse<br/>on the longest contour"
             )
+
+    with ui.column():
+        table_raw = ui.table(
+            title="Raw Results",
+            columns=TABLE_COLUMNS,
+            rows=raw_rows,
+            row_key="parameter",
+        )
+
+        table_corrected = ui.table(
+            title="Corrected Results",
+            columns=TABLE_COLUMNS,
+            rows=corrected_rows,
+            row_key="parameter",
+        )
 
     with open("doc.md", "r") as f:
         doc = f.read()

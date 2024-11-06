@@ -10,13 +10,9 @@ poetry run python main.py
 
 Currently, you may meet these issues during debugging:
 
-#### Occupied port
+#### `ERROR:    [Errno 98] Address already in use`
 
-The console says:
-
-```
-ERROR:    [Errno 98] Address already in use
-```
+**Solution**
 
 It's caused by NiceGUI's port monitoring machanism. To overcome it, simply you can (if it's safe):
 
@@ -37,7 +33,7 @@ Error: connect ENOENT /run/user/1000/vscode-ipc-b4272caf-f67a-4696-93b0-a7bcf845
 }
 ```
 
-Solution:
+**Solution**
 
 1. Close all VS code client.
 2. SSH into the host

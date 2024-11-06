@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+from scipy.integrate import quad
 
 
 def distance_to_major_axis(point, center, angle):
@@ -62,21 +63,56 @@ def detect_circle(contours):
 
     return circles
 
+
 def remove_hypotenuse(contours):
     filtered_contours = []
-    
+
     for contour in contours:
         area = cv2.contourArea(contour)
-        
+
         # 忽略面积太小的轮廓
         if area < 100:
             continue
-        
+
         x, y, w, h = cv2.boundingRect(contour)
-        aspect_ratio = float(w)/h
-        
+        aspect_ratio = float(w) / h
+
         # 过滤宽高比大于阈值的轮廓
         if 0.2 < aspect_ratio < 5:
             filtered_contours.append(contour)
 
     return filtered_contours
+
+
+def get_new_width(
+    focal_length,
+    real_width,
+    image_width,
+    object_pixel_width,
+    sensor_width,
+    pixels_moved,
+):
+    initial_distance_px = (
+        focal_length
+        * real_width
+        * image_width
+        * image_width
+        / (object_pixel_width * sensor_width * sensor_width)
+    )
+    new_distance_mm = (initial_distance_px - pixels_moved) / image_width * sensor_width
+    new_pixel_width = (
+        focal_length * real_width * image_width / new_distance_mm / sensor_width
+    )
+
+    return new_pixel_width
+
+
+def calc_volume(distances):
+    return np.sum(
+        np.array(
+            [
+                quad(calc_area, distances[i], distances[i + 1])[0]
+                for i in range(len(distances) - 1)
+            ]
+        )
+    )

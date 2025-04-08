@@ -92,16 +92,14 @@ def get_new_width(
     sensor_width,
     pixels_moved,
 ):
-    initial_distance_px = (
-        focal_length
-        * real_width
-        * image_width
-        * image_width
-        / (object_pixel_width * sensor_width * sensor_width)
+    initial_distance_mm = (
+        focal_length * real_width * image_width / (object_pixel_width * sensor_width)
     )
-    new_distance_mm = (initial_distance_px - pixels_moved) / image_width * sensor_width
+
+    new_distance_mm = initial_distance_mm - pixels_moved * sensor_width / image_width
+
     new_pixel_width = (
-        focal_length * real_width * image_width / new_distance_mm / sensor_width
+        focal_length * real_width * image_width / (new_distance_mm * sensor_width)
     )
 
     return new_pixel_width
@@ -116,3 +114,72 @@ def calc_volume(distances):
             ]
         )
     )
+
+
+def convert_pt(point, w, h):
+    pc = (point[0] - w / 2, point[1] - h / 2)
+
+    f = w
+    r = w
+
+    omega = w / 2
+    z0 = f - np.sqrt(r * r - omega * omega)
+
+    zc = (
+        2 * z0
+        + np.sqrt(4 * z0 * z0 - 4 * (pc[0] * pc[0] / (f * f) + 1) * (z0 * z0 - r * r))
+    ) / (2 * (pc[0] * pc[0] / (f * f) + 1))
+    final_point = (pc[0] * zc / f, pc[1] * zc / f)
+    final_point = (final_point[0] + w / 2, final_point[1] + h / 2)
+    return final_point
+
+
+def unwrap(image):
+    height, width = image.shape
+    dest_im = np.zeros((height, width), dtype=image.dtype)
+
+    for y in range(height):
+        for x in range(width):
+            current_pos = (x, y)
+            current_pos = convert_pt(current_pos, width, height)
+
+            top_left = (int(current_pos[0]), int(current_pos[1]))
+
+            if (
+                top_left[0] < 0
+                or top_left[0] > width - 2
+                or top_left[1] < 0
+                or top_left[1] > height - 2
+            ):
+                continue
+
+            dx = current_pos[0] - top_left[0]
+            dy = current_pos[1] - top_left[1]
+
+            weight_tl = (1.0 - dx) * (1.0 - dy)
+            weight_tr = dx * (1.0 - dy)
+            weight_bl = (1.0 - dx) * dy
+            weight_br = dx * dy
+
+            value = (
+                weight_tl * image[top_left[1], top_left[0]]
+                + weight_tr * image[top_left[1] + 1, top_left[0]]
+                + weight_bl * image[top_left[1], top_left[0] + 1]
+                + weight_br * image[top_left[1] + 1, top_left[0] + 1]
+            )
+
+            dest_im[y, x] = value
+
+    return dest_im
+
+def close_then_open(img: cv2.typing.MatLike):
+    resized = cv2.resize(img, dsize=(0, 0), fx=0.25, fy=0.25)
+    closed = cv2.morphologyEx(
+        resized, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    )
+
+    opened = cv2.morphologyEx(
+        closed, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    )
+
+    return cv2.resize(opened, dsize=(img.shape[1], img.shape[0]))

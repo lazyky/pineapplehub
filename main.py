@@ -8,6 +8,8 @@ from pineapplehub.calc import (
     detect_circle,
     remove_hypotenuse,
     get_new_width,
+    unwrap,
+    close_then_open,
 )
 import cv2
 import numpy as np
@@ -19,7 +21,7 @@ from io import BytesIO
 import time
 import copy
 from pineapplehub.exif import ImageWithExif
-from pineapplehub.ui import TABLE_COLUMNS
+from pineapplehub.ui import TABLE_COLUMNS, reset_table
 from pineapplehub.result import Result
 
 ui.add_body_html(
@@ -115,16 +117,25 @@ def resize_img(arr, to_rgb=False) -> Image:
     screen_shorter = min(screen_w, screen_h)
 
     if w > h:
-        new_w = screen_shorter
+        new_w = int(screen_shorter)
         new_h = int((new_w / w) * h)
     else:
-        new_h = screen_shorter
+        new_h = int(screen_shorter)
         new_w = int((new_h / h) * w)
 
     return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
 
 def compute(inputs: ImageWithExif, q):
+    # h,  w = inputs.img.shape[:2]
+    # newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w,h), 1, (w,h))
+    # inputs.img = cv2.undistort(inputs.img, mtx, dist, None, newcameramtx)
+    # x, y, w, h = roi
+    # inputs.img = inputs.img[y:y+h, x:x+w]
+
+    # inputs.img = cv2.rotate(inputs.img, cv2.ROTATE_90_CLOCKWISE)
+    raw = copy.deepcopy(inputs.img)
+
     gray = cv2.cvtColor(inputs.img, cv2.COLOR_BGR2GRAY)
     q.put(resize_img(gray))
     q.put(None)
@@ -147,7 +158,7 @@ def compute(inputs: ImageWithExif, q):
     q.put(None)
 
     opened = cv2.morphologyEx(
-        closed, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 9))
+        closed, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     )
     q.put(Image.fromarray(opened))
     q.put(None)
@@ -205,9 +216,158 @@ def compute(inputs: ImageWithExif, q):
         angle = 180 - angle
 
     center = (int(center_x), int(center_y))
-    cv2.ellipse(inputs.img, center, axes, angle, 0, 360, (0, 255, 0), 2)
 
-    long_axis_direction = np.array([width, 0]).reshape((2, 1)) / np.linalg.norm(width)
+    box = cv2.boxPoints(rect)
+    box = np.int_(box)
+
+    width = int(rect[1][0])
+    height = int(rect[1][1])
+
+    dst_pts = np.array(
+        [[0, height - 1], [0, 0], [width - 1, 0], [width - 1, height - 1]],
+        dtype="float32",
+    )
+
+    M = cv2.getPerspectiveTransform(box.astype("float32"), dst_pts)
+    warped = cv2.warpPerspective(raw, M, (width, height))
+
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    smoothed = cv2.GaussianBlur(gray, (7, 7), 0)
+    unwrapped = unwrap(smoothed)
+
+    _, binary_img = cv2.threshold(
+        unwrapped, 127, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+
+    contours, _ = cv2.findContours(
+        close_then_open(binary_img), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+    )
+    longest_contour = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(longest_contour)
+    box = cv2.boxPoints(rect)
+    box = np.int_(box)
+    box_sorted = sorted(box, key=lambda x: x[1])
+    top_edge = [box_sorted[0], box_sorted[1]]
+    bottom_edge = [box_sorted[2], box_sorted[3]]
+
+    cv2.line(unwrapped, tuple(top_edge[0]), tuple(top_edge[1]), 255, 2)
+    cv2.line(unwrapped, tuple(bottom_edge[0]), tuple(bottom_edge[1]), 255, 2)
+
+    top_mid = (
+        (top_edge[0][0] + top_edge[1][0]) // 2,
+        (top_edge[0][1] + top_edge[1][1]) // 2,
+    )
+    bottom_mid = (
+        (bottom_edge[0][0] + bottom_edge[1][0]) // 2,
+        (bottom_edge[0][1] + bottom_edge[1][1]) // 2,
+    )
+
+    dash_length = 10
+    gap_length = 5
+    line_thickness = 2
+
+    dx = bottom_mid[0] - top_mid[0]
+    dy = bottom_mid[1] - top_mid[1]
+    line_length = np.sqrt(dx**2 + dy**2)
+
+    unit_dx = dx / line_length
+    unit_dy = dy / line_length
+
+    current_length = 0
+    while current_length < line_length:
+        start = (
+            int(top_mid[0] + unit_dx * current_length),
+            int(top_mid[1] + unit_dy * current_length),
+        )
+        end = (
+            int(top_mid[0] + unit_dx * (current_length + dash_length)),
+            int(top_mid[1] + unit_dy * (current_length + dash_length)),
+        )
+
+        cv2.line(unwrapped, start, end, 255, line_thickness)
+
+        current_length += dash_length + gap_length
+
+    q.put(resize_img(cv2.hconcat([smoothed, unwrapped])))
+
+    # Vertical, with correct height
+    if warped.shape[0] >= warped.shape[1]:
+        final_height = max(rect[1])
+    # Horizonal, with correct distances
+    else:
+        true_rect = copy.deepcopy(rect)
+        final_width = min(rect[1])
+
+    rotated = cv2.rotate(smoothed, cv2.ROTATE_90_CLOCKWISE)
+    unwrapped = unwrap(rotated)
+    _, binary_img = cv2.threshold(
+        unwrapped, 127, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    contours, _ = cv2.findContours(
+        close_then_open(binary_img), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+    )
+    longest_contour = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(longest_contour)
+    box = cv2.boxPoints(rect)
+    box = np.int_(box)
+    box_sorted = sorted(box, key=lambda x: x[1])  # Sort by y
+    top_edge = [box_sorted[0], box_sorted[1]]
+    bottom_edge = [box_sorted[2], box_sorted[3]]
+
+    cv2.line(unwrapped, tuple(top_edge[0]), tuple(top_edge[1]), 255, 2)
+    cv2.line(unwrapped, tuple(bottom_edge[0]), tuple(bottom_edge[1]), 255, 2)
+
+    top_mid = (
+        (top_edge[0][0] + top_edge[1][0]) // 2,
+        (top_edge[0][1] + top_edge[1][1]) // 2,
+    )
+    bottom_mid = (
+        (bottom_edge[0][0] + bottom_edge[1][0]) // 2,
+        (bottom_edge[0][1] + bottom_edge[1][1]) // 2,
+    )
+
+    dash_length = 10
+    gap_length = 5
+    line_thickness = 2
+
+    # Slope and length
+    dx = bottom_mid[0] - top_mid[0]
+    dy = bottom_mid[1] - top_mid[1]
+    line_length = np.sqrt(dx**2 + dy**2)
+
+    # Direction vector
+    unit_dx = dx / line_length
+    unit_dy = dy / line_length
+
+    # Draw dash line
+    current_length = 0
+    while current_length < line_length:
+        start = (
+            int(top_mid[0] + unit_dx * current_length),
+            int(top_mid[1] + unit_dy * current_length),
+        )
+        end = (
+            int(top_mid[0] + unit_dx * (current_length + dash_length)),
+            int(top_mid[1] + unit_dy * (current_length + dash_length)),
+        )
+
+        cv2.line(unwrapped, start, end, 255, line_thickness)
+
+        current_length += dash_length + gap_length
+
+    # Vertical, with correct height
+    if warped.shape[0] >= warped.shape[1]:
+        true_rect = copy.deepcopy(rect)
+        final_width = min(rect[1])
+    # Horizonal, with correct distances
+    else:
+        final_height = max(rect[1])
+        
+
+    (center_x, center_y), (width, height), angle = true_rect
+    long_axis_direction = np.array([width, 0]).reshape((2, 1)) / np.linalg.norm(
+        width
+    )
     valid_points = []
     for point in longest_contour:
         x, y = point[0]
@@ -243,35 +403,31 @@ def compute(inputs: ImageWithExif, q):
     raw_distances = distances_pixels * raw_factor
     corrected_distances = distances_pixels * corrected_factor
 
-    box = cv2.boxPoints(rect)
-    box = np.int_(box)
+    q.put(resize_img(cv2.hconcat([rotated, unwrapped])))
 
-    cv2.drawContours(inputs.img, [box], 0, (0, 255, 0), 2)
-    q.put(resize_img(inputs.img, to_rgb=True))
 
     return (
-        Result(width * raw_factor, height * raw_factor, calc_volume(raw_distances)),
         Result(
-            width * corrected_factor,
-            height * corrected_factor,
+            final_width * raw_factor,
+            final_height * raw_factor,
+            calc_volume(raw_distances),
+        ),
+        Result(
+            final_width * corrected_factor,
+            final_height * corrected_factor,
             calc_volume(corrected_distances),
         ),
     )
 
 
 async def handle_upload(e):
-    try:
-        table
-    except:  # noqa: E722
-        pass
-    else:
-        if not table.is_deleted:
-            choose = await confirm_dialog
-            if choose == "Yes":
-                clear_all()
-            else:
-                ui.notify("User canceled.")
-                return
+    if raw_rows[0]["value"] is not None:
+        choose = await confirm_dialog
+        if choose == "Yes":
+            clear_all()
+        else:
+            ui.notify("User canceled.")
+            return
 
     global inputs
 
@@ -317,8 +473,6 @@ def disable(button: ui.button):
 
 
 async def handle_compute(button: ui.button):
-    global table
-
     try:
         inputs
     except NameError:
@@ -346,6 +500,8 @@ async def handle_compute(button: ui.button):
                 corrected_rows[0]["value"] = corrected_results.major
                 corrected_rows[1]["value"] = corrected_results.minor
                 corrected_rows[2]["value"] = corrected_results.volume
+                table_raw.update()
+                table_corrected.update()
 
             finally:
                 # To wait job in timer finished
@@ -367,12 +523,53 @@ def clear_all():
         # `.delete()` will not remove the element from the list,
         # but the remaining ones do NOT have `.delete()` method anymore
         stepper_imgs.clear()
-        table.delete()
+        reset_table(raw_rows)
+        reset_table(corrected_rows)
     except (ValueError, NameError) as e:
         ui.notify(e, close_button="GOT", type="negative")
     finally:
         uploader.clear()
 
+
+def handle_markers(e):
+    global mtx, dist
+
+    all_object_points = []
+    all_image_points = []
+
+    for marker in e.contents:
+        gray = cv2.imdecode(
+            np.frombuffer(marker.read(), np.uint8), cv2.IMREAD_GRAYSCALE
+        )
+        board = cv2.aruco.CharucoBoard(
+            (5, 7),
+            0.03,
+            0.015,
+            cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100),
+        )
+        detector = cv2.aruco.CharucoDetector(board)
+        charuco_corners, charuco_ids, marker_corners, marker_ids = detector.detectBoard(
+            gray
+        )
+
+        if len(charuco_ids) >= 4 and len(marker_corners) > 3:
+            object_points, image_points = board.matchImagePoints(
+                charuco_corners, charuco_ids
+            )
+            all_object_points.append(object_points)
+            all_image_points.append(image_points)
+
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+        all_object_points, all_image_points, gray.shape[::-1], None, None
+    )
+
+
+with ui.dialog() as calib_dialog, ui.card():
+    ui.upload(
+        multiple=True,
+        on_upload=lambda e: ui.notify(f"Uploaded {e.name}"),
+        on_multi_upload=handle_markers,
+    ).classes("max-w-full")
 
 with ui.left_drawer(top_corner=True, bottom_corner=True):
     ui.label("Please pick the pineapple image:")
@@ -380,13 +577,16 @@ with ui.left_drawer(top_corner=True, bottom_corner=True):
 
     details_switch = ui.switch("Show the details", value=True)
 
+    ui.button("Calibrate", on_click=calib_dialog.open)
     ui.button("Compute", on_click=lambda e: handle_compute(e.sender))
     reset_button = ui.button("Reset", on_click=clear_all)
 
 with ui.row():
-    with ui.stepper().props("vertical header-nav").bind_visibility_from(
-        details_switch, "value"
-    ) as stepper:
+    with (
+        ui.stepper()
+        .props("vertical header-nav")
+        .bind_visibility_from(details_switch, "value") as stepper
+    ):
         with ui.step("Gray"):
             ui.label("Transform the image to gray")
         with ui.step("Smoothing"):
@@ -401,10 +601,8 @@ with ui.row():
             ui.label("Find the scaler")
         with ui.step("Contour"):
             ui.label("Find the longest contour")
-        with ui.step("Fitting"):
-            ui.markdown(
-                "Fit minimal rectangle<br/>and its inscribed ellipse<br/>on the longest contour"
-            )
+        with ui.step("Unwrapping"):
+            ui.markdown("Warp perspective then unwrap")
 
     with ui.column():
         table_raw = ui.table(
@@ -425,8 +623,10 @@ with ui.row():
         doc = f.read()
     ui.markdown(doc)
 
-with ui.header(elevated=True).style("background-color: #3874c8").classes(
-    "items-center justify-between"
+with (
+    ui.header(elevated=True)
+    .style("background-color: #3874c8")
+    .classes("items-center justify-between")
 ):
     ui.label("Pineapple Hub")
     ui.space()
@@ -441,9 +641,11 @@ with ui.header(elevated=True).style("background-color: #3874c8").classes(
         ),
     ).props("flat color=white")
 
-with ui.right_drawer(fixed=False).style("background-color: #ebf1fa").props(
-    "bordered"
-) as right_drawer:
+with (
+    ui.right_drawer(fixed=False)
+    .style("background-color: #ebf1fa")
+    .props("bordered") as right_drawer
+):
     with open("CHANGELOG.md", "r") as f:
         changelog = f.read()
     ui.markdown(changelog)

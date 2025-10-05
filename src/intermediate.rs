@@ -1,11 +1,12 @@
-use ::image::DynamicImage;
+use ::image::{DynamicImage, EncodableLayout};
 use iced::{
     Color, ContentFit, Element, Fill, Shadow,
     time::Instant,
     widget::{button, container, float, horizontal_space, image, mouse_area, stack},
 };
+use sipper::{Straw, sipper};
 
-use crate::{Message, Preview};
+use crate::{Message, Preview, error::Error};
 
 pub(crate) type EncodedImage = Vec<u8>;
 
@@ -14,35 +15,63 @@ pub(crate) type EncodedImage = Vec<u8>;
 pub(crate) enum Step {
     Original,
     Gray,
+    Final,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Intermediate {
     pub(crate) current_step: Step,
     pub(crate) preview: Preview,
-    pub(crate) image: Option<DynamicImage>,
 }
 
 impl Intermediate {
-    pub(crate) fn card(&self, now: Instant) -> Element<Message> {
+    pub(crate) fn process(self) -> impl Straw<Self, Vec<u8>, Error> {
+        sipper(async move |mut sender| {
+            let image: DynamicImage = self.preview.into();
+            let blurhash = blurhash::encode(
+                4,
+                3,
+                image.width(),
+                image.height(),
+                &image.to_rgba8().as_bytes(),
+            )
+            .unwrap();
+            let _ = sender
+                .send(blurhash::decode(&blurhash, 20, 20, 1.0).unwrap())
+                .await;
+
+            match self.current_step {
+                Step::Original => Ok(Intermediate {
+                    current_step: Step::Gray,
+                    preview: Preview::ready(
+                        DynamicImage::ImageLuma8(image.clone().to_luma8()),
+                        Instant::now(),
+                    ),
+                }),
+                Step::Gray => todo!(),
+                Step::Final => todo!(),
+            }
+        })
+    }
+    pub(crate) fn card(&self, now: Instant) -> Element<'_, Message> {
         let image = {
-            let thumbnail: Element<'_, _> = if let Preview::Ready { thumbnail, .. } = &self.preview
+            let thumbnail: Element<'_, _> = if let Preview::Ready { result_img, .. } = &self.preview
             {
                 float(
-                    image(&thumbnail.handle)
+                    image(&result_img.get_handle())
                         .width(Fill)
                         .content_fit(ContentFit::Cover)
-                        .opacity(thumbnail.fade_in.interpolate(0.0, 1.0, now)),
+                        .opacity(result_img.fade_in.interpolate(0.0, 1.0, now)),
                 )
-                .scale(thumbnail.zoom.interpolate(1.0, 1.1, now))
+                .scale(result_img.zoom.interpolate(1.0, 1.1, now))
                 .translate(move |bounds, viewport| {
                     bounds.zoom(1.1).offset(&viewport.shrink(10))
-                        * thumbnail.zoom.interpolate(0.0, 1.0, now)
+                        * result_img.zoom.interpolate(0.0, 1.0, now)
                 })
                 .style(move |_theme| float::Style {
                     shadow: Shadow {
-                        color: Color::BLACK.scale_alpha(thumbnail.zoom.interpolate(0.0, 1.0, now)),
-                        blur_radius: thumbnail.zoom.interpolate(0.0, 20.0, now),
+                        color: Color::BLACK.scale_alpha(result_img.zoom.interpolate(0.0, 1.0, now)),
+                        blur_radius: result_img.zoom.interpolate(0.0, 20.0, now),
                         ..Shadow::default()
                     },
                     ..float::Style::default()
@@ -68,10 +97,10 @@ impl Intermediate {
             .on_enter(Message::ThumbnailHovered(self.current_step.clone(), true))
             .on_exit(Message::ThumbnailHovered(self.current_step.clone(), false));
 
-        let is_thumbnail = matches!(self.preview, Preview::Ready { .. });
+        let is_result = matches!(self.preview, Preview::Ready { .. });
 
         button(card)
-            .on_press_maybe(is_thumbnail.then_some(Message::Open(self.current_step.clone())))
+            .on_press_maybe(is_result.then_some(Message::Open(self.current_step.clone())))
             .padding(0)
             .style(button::text)
             .into()

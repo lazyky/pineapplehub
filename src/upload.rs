@@ -74,7 +74,7 @@ impl Upload {
         }
     }
 
-    pub(crate) fn view(&self) -> Element<Message> {
+    pub(crate) fn view(&self) -> Element<'_, Message> {
         match &self.state {
             State::Idle => column![progress_bar(0.0..=100.0, 0.0)],
             State::Uploading { progress, .. } => match progress {
@@ -167,12 +167,11 @@ pub(crate) fn upload() -> impl Straw<Option<Intermediate>, Progress, Error> {
             .decode()?
             .resize(1024, 1024, imageops::Gaussian);
 
-            let preview = Preview::ready(image.clone(), Instant::now());
+            let preview = Preview::ready(image, Instant::now());
 
             Ok(Some(Intermediate {
                 current_step: Step::Original,
                 preview,
-                image: Some(image),
             }))
         } else {
             Ok(None)

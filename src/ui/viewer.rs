@@ -1,5 +1,4 @@
 use crate::Message;
-use ::image::DynamicImage;
 use iced::{
     Animation, Element, Fill, animation, color,
     time::Instant,
@@ -31,12 +30,8 @@ impl Viewer {
         self.background_fade_in.go_mut(true, now);
     }
 
-    pub(crate) fn show(&mut self, img: DynamicImage, now: Instant) {
-        self.image = Some(image::Handle::from_rgba(
-            img.width(),
-            img.height(),
-            img.to_rgba8().into_raw(),
-        ));
+    pub(crate) fn show(&mut self, img: image::Handle, now: Instant) {
+        self.image = Some(img);
         self.background_fade_in.go_mut(true, now);
         self.image_fade_in.go_mut(true, now);
     }

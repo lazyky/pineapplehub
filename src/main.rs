@@ -2,19 +2,21 @@ mod error;
 mod intermediate;
 mod ui;
 mod upload;
+mod utils;
 
 use crate::{
+    error::Error,
     intermediate::{EncodedImage, Intermediate, Step},
     ui::{preview::Preview, viewer::Viewer},
     upload::{State, Update, Upload},
+    utils::dynamic_image_to_handle,
 };
 
-use ::image::{imageops, DynamicImage, EncodableLayout};
 use iced::{
-    advanced::image::Bytes,
+    Element, Function, Length, Subscription, Task,
     time::Instant,
-    widget::{button, column, container, grid, horizontal_space, image, row, scrollable, stack},
-    window, Element, Length, Subscription, Task,
+    widget::{button, column, container, grid, row, scrollable, stack},
+    window,
 };
 
 #[non_exhaustive]
@@ -22,7 +24,8 @@ use iced::{
 enum Message {
     Upload,
     UploadUpdated(Update),
-    Process,
+    Process(Result<Intermediate, Error>),
+    BlurhashDecoded(Intermediate, Vec<u8>),
     ThumbnailHovered(Step, bool),
     Open(Step),
     Close,
@@ -30,7 +33,6 @@ enum Message {
 }
 struct Img {
     upload: Upload,
-    origin: Option<Intermediate>,
     now: Instant,
     viewer: Viewer,
     intermediates: Vec<Intermediate>,
@@ -40,7 +42,6 @@ impl Img {
     fn new() -> Self {
         Self {
             upload: Upload::new(),
-            origin: None,
             now: Instant::now(),
             viewer: Viewer::new(),
             intermediates: Vec::new(),
@@ -75,45 +76,17 @@ impl Img {
 
                 Task::none()
             }
-            Message::Process => {
-                if let State::Finished(image) = &self.upload.state {
-                    let image = image.image.clone().unwrap();
-                    let preview = Preview::loading(
-                        blurhash::decode(
-                            &blurhash::encode(
-                                4,
-                                3,
-                                image.width(),
-                                image.height(),
-                                image.to_rgba8().as_bytes(),
-                            )
-                            .unwrap(),
-                            50,
-                            50,
-                            1.0,
-                        )
-                        .unwrap(),
-                        now,
-                    );
-                    self.intermediates.push(Intermediate {
-                        current_step: Step::Gray,
-                        preview,
-                        image: None,
-                    });
-                    let res = DynamicImage::ImageLuma8(image.to_luma8());
-
-                    let thumbnail = res.resize(res.width(), res.height(), imageops::Lanczos3);
-
-                    let preview = Preview::ready(thumbnail, now);
-
-                    if let Some(last) = self.intermediates.last_mut() {
-                        *last = Intermediate {
-                            current_step: Step::Gray,
-                            preview,
-                            image: Some(res),
-                        }
-                    }
-                }
+            Message::Process(Ok(inter)) => match inter.current_step {
+                Step::Final => Task::none(),
+                _ => Task::sip(
+                    inter.clone().process(),
+                    Message::BlurhashDecoded.with(inter),
+                    Message::Process,
+                ),
+            },
+            Message::BlurhashDecoded(mut inter, blurhash) => {
+                inter.preview = Preview::loading(blurhash, self.now);
+                self.intermediates.push(inter);
 
                 Task::none()
             }
@@ -124,6 +97,8 @@ impl Img {
                     .find(|i| i.current_step == step)
                 {
                     i.preview.toggle_zoom(is_hovered, self.now);
+                } else if let State::Finished(i) = &self.upload.state {
+                    i.preview.clone().toggle_zoom(is_hovered, self.now);
                 }
 
                 Task::none()
@@ -135,7 +110,13 @@ impl Img {
                     .find(|i| i.current_step == step)
                     .cloned()
                 {
-                    self.viewer.show(intermediate.image.unwrap(), self.now);
+                    self.viewer.show(
+                        dynamic_image_to_handle(&intermediate.preview.into()),
+                        self.now,
+                    );
+                } else if let State::Finished(i) = &self.upload.state {
+                    self.viewer
+                        .show(dynamic_image_to_handle(&i.clone().preview.into()), self.now);
                 }
 
                 Task::none()
@@ -145,34 +126,36 @@ impl Img {
 
                 Task::none()
             }
-            Message::Animate => Task::none(),
+            Message::Animate | Message::Process(Err(_)) => Task::none(),
         }
     }
 
-    fn view(&self) -> Element<Message> {
-        let content = container(row![
-            column![
-                button("Choose the image").on_press(Message::Upload),
-                self.upload.view(),
-                if let Some(img) = &self.origin {
-                    let img = img.image.as_ref().unwrap().to_rgba8();
-                    container(image(image::Handle::from_rgba(
-                        img.width(),
-                        img.height(),
-                        Bytes::from(img.into_raw()),
-                    )))
-                } else {
-                    container(horizontal_space()).style(container::dark)
-                },
-                button("Do it!").on_press(Message::Process),
-            ]
+    fn view(&self) -> Element<'_, Message> {
+        let controls = column![]
+            .push(button("Choose the image").on_press(Message::Upload))
+            .push(self.upload.view())
+            .push_maybe(match &self.upload.state {
+                State::Finished(i) => Some(i.card(self.now)),
+                _ => None,
+            })
+            .push_maybe(match &self.upload.state {
+                State::Finished(i) => {
+                    Some(button("Do it!").on_press(Message::Process(Ok(i.clone()))))
+                }
+                _ => None,
+            })
             .spacing(10)
-            .width(Length::FillPortion(2)),
-            scrollable(column![grid(
-                self.intermediates.iter().map(|i| i.card(self.now))
-            )])
-            .width(Length::FillPortion(8))
-        ]);
+            .width(Length::FillPortion(2));
+        let content = container(
+            row![
+                controls,
+                scrollable(column![grid(
+                    self.intermediates.iter().map(|i| i.card(self.now))
+                )])
+                .width(Length::FillPortion(8))
+            ]
+            .spacing(10),
+        );
 
         let viewer = self.viewer.view(self.now);
 

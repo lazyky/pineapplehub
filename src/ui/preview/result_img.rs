@@ -1,12 +1,12 @@
 use ::image::DynamicImage;
-use iced::{Animation, animation, time::Instant, widget::image};
+use iced::{Animation, animation, time::Instant};
 
 /// The process result image with animation states.
 #[derive(Clone, Debug)]
-pub(crate) struct ResultImg {
-    pub(crate) img: DynamicImage,
-    pub(crate) fade_in: Animation<bool>,
-    pub(crate) zoom: Animation<bool>,
+pub struct ResultImg {
+    pub img: DynamicImage,
+    pub fade_in: Animation<bool>,
+    pub zoom: Animation<bool>,
 }
 
 impl ResultImg {

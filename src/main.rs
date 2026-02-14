@@ -1,3 +1,5 @@
+mod adaptive;
+mod correction;
 mod error;
 mod intermediate;
 mod ui;
@@ -82,7 +84,7 @@ impl Img {
                     *last = inter.clone();
                 }
                 match inter.current_step {
-                    Step::Final => Task::none(),
+                    Step::FinalCount => Task::none(),
                     _ => Task::sip(
                         inter.clone().process(),
                         Message::BlurhashDecoded.with(inter),
@@ -132,7 +134,11 @@ impl Img {
 
                 Task::none()
             }
-            Message::Animate | Message::Process(Err(_)) => Task::none(),
+            Message::Animate => Task::none(),
+            Message::Process(Err(e)) => {
+                log::error!("Processing failed: {e:?}");
+                Task::none()
+            }
         }
     }
 

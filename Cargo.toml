@@ -3,6 +3,13 @@ name = "pineapplehub"
 version = "0.1.0"
 edition = "2024"
 
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+
 [dependencies]
 iced = { version = "0.14", features = [
   "image",
@@ -17,7 +24,7 @@ rfd = { version = "0.17", features = [
 ] }
 image = "0.25"
 imageproc = "0.26"
-image-debug-utils = "0.1"
+image-debug-utils = { git = "https://github.com/bioinformatist/image-debug-utils.git", branch = "main" }
 blurhash = "0.2.3"
 thiserror = "2"
 sipper = "0.1"
@@ -30,3 +37,9 @@ web-sys = "0.3"
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 log = "0.4"
+num-complex = "0.4.6"
+ndarray = "0.16"
+getrandom = { version = "0.2", features = ["js"] }
+uuid = { version = "1.19.0", features = ["js"] }
+rustfft = "6.4.1"
+exif = { package = "kamadak-exif", version = "0.6" }

@@ -25,11 +25,6 @@ impl Viewer {
         }
     }
 
-    fn open(&mut self, now: Instant) {
-        self.image = None;
-        self.background_fade_in.go_mut(true, now);
-    }
-
     pub(crate) fn show(&mut self, img: image::Handle, now: Instant) {
         self.image = Some(img);
         self.background_fade_in.go_mut(true, now);

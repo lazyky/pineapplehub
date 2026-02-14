@@ -8,6 +8,8 @@ pub(crate) enum Error {
     Decode(Arc<image::ImageError>),
     #[error("File read failed: JS runtime error: {0}")]
     Read(String),
+    #[error("General error: {0}")]
+    General(String),
 }
 
 impl From<image::ImageError> for Error {

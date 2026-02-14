@@ -6,7 +6,7 @@ use iced::{
     time::{Instant, milliseconds},
     widget::image,
 };
-use result_img::ResultImg;
+pub use result_img::ResultImg;
 
 use crate::EncodedImage;
 
@@ -24,7 +24,7 @@ pub(crate) enum Preview {
     /// The `Intermediate` is ready to be displayed
     Ready {
         blurhash: Option<Blurhash>,
-        result_img: ResultImg,
+        result_img: Box<ResultImg>,
     },
 }
 
@@ -66,18 +66,7 @@ impl Preview {
     pub(crate) fn ready(img: DynamicImage, now: Instant) -> Self {
         Self::Ready {
             blurhash: None,
-            result_img: ResultImg::new(img, now),
-        }
-    }
-
-    fn load(self, img: DynamicImage, now: Instant) -> Self {
-        let Self::Processing { blurhash } = self else {
-            return self;
-        };
-
-        Self::Ready {
-            blurhash: Some(blurhash),
-            result_img: ResultImg::new(img, now),
+            result_img: Box::new(ResultImg::new(img, now)),
         }
     }
 

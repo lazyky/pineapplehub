@@ -3,9 +3,9 @@ use imageops::FilterType;
 use imageproc::{
     contours::find_contours_with_threshold,
     distance_transform::Norm,
-    drawing::draw_line_segment_mut,
+    drawing::{draw_hollow_polygon_mut, draw_line_segment_mut},
     geometric_transformations::{Interpolation, rotate_about_center},
-    geometry::min_area_rect,
+    geometry::{arc_length, min_area_rect},
     morphology::{dilate, erode},
     point::Point,
 };
@@ -47,7 +47,10 @@ fn get_tight_bounds(
     let restored = imageops::resize(&opened, w, h, imageops::FilterType::Nearest);
 
     let contours = find_contours_with_threshold(&restored, 127);
-    if let Some(longest) = contours.into_iter().max_by_key(|c| c.points.len()) {
+    if let Some(longest) = contours
+        .into_iter()
+        .max_by(|a, b| arc_length(&a.points, true).total_cmp(&arc_length(&b.points, true)))
+    {
         let corners = min_area_rect(&longest.points);
         Some((corners, longest.points))
     } else {
@@ -154,57 +157,72 @@ fn draw_dashed_line(img: &mut RgbaImage, start: (f32, f32), end: (f32, f32), col
     }
 }
 
-/// Draws solid top/bottom edges and a dashed centerline for a panel's tight bounds.
+/// Draws all four edges of the bounding rectangle using `draw_hollow_polygon_mut`,
+/// plus a dashed centerline along the major (longer) axis.
 fn draw_panel_bounds(
     color_preview: &mut RgbaImage,
-    box_points: &mut [Point<i32>; 4],
+    box_points: &[Point<i32>; 4],
     x_offset: u32,
     y_offset: u32,
 ) {
     let red = Rgba([255, 0, 0, 255]);
-    box_points.sort_by_key(|p| p.y);
 
-    // Top edge = 0 and 1, Bottom edge = 2 and 3
-    let top_mid_x = (box_points[0].x as f32 + box_points[1].x as f32) / 2.0 + x_offset as f32;
-    let top_mid_y = (box_points[0].y as f32 + box_points[1].y as f32) / 2.0 + y_offset as f32;
+    // Offset all points to the panel position
+    let offset_points: Vec<Point<i32>> = box_points
+        .iter()
+        .map(|p| Point::new(p.x + x_offset as i32, p.y + y_offset as i32))
+        .collect();
 
-    let bot_mid_x = (box_points[2].x as f32 + box_points[3].x as f32) / 2.0 + x_offset as f32;
-    let bot_mid_y = (box_points[2].y as f32 + box_points[3].y as f32) / 2.0 + y_offset as f32;
+    // draw_hollow_polygon_mut expects Point<f32>
+    let float_points: Vec<Point<f32>> = offset_points
+        .iter()
+        .map(|p| Point::new(p.x as f32, p.y as f32))
+        .collect();
 
-    // Solid top edge
-    draw_line_segment_mut(
-        color_preview,
-        (
-            box_points[0].x as f32 + x_offset as f32,
-            box_points[0].y as f32 + y_offset as f32,
-        ),
-        (
-            box_points[1].x as f32 + x_offset as f32,
-            box_points[1].y as f32 + y_offset as f32,
-        ),
-        red,
-    );
-    // Solid bottom edge
-    draw_line_segment_mut(
-        color_preview,
-        (
-            box_points[2].x as f32 + x_offset as f32,
-            box_points[2].y as f32 + y_offset as f32,
-        ),
-        (
-            box_points[3].x as f32 + x_offset as f32,
-            box_points[3].y as f32 + y_offset as f32,
-        ),
-        red,
-    );
+    // Draw all 4 edges of the rectangle
+    draw_hollow_polygon_mut(color_preview, &float_points, red);
 
-    // Dashed centerline
-    draw_dashed_line(
-        color_preview,
-        (top_mid_x, top_mid_y),
-        (bot_mid_x, bot_mid_y),
-        red,
-    );
+    // Identify the two longer edges and draw a dashed centerline between their midpoints.
+    // Edge 0-1 and Edge 1-2 are adjacent; compare their lengths to find the major axis.
+    let d01 = {
+        let dx = (box_points[1].x - box_points[0].x) as f32;
+        let dy = (box_points[1].y - box_points[0].y) as f32;
+        dx * dx + dy * dy
+    };
+    let d12 = {
+        let dx = (box_points[2].x - box_points[1].x) as f32;
+        let dy = (box_points[2].y - box_points[1].y) as f32;
+        dx * dx + dy * dy
+    };
+
+    // Midpoints of the two longer (major-axis) edges
+    let (mid_a, mid_b) = if d01 >= d12 {
+        // Edges 0-1 and 2-3 are the longer pair
+        (
+            (
+                (offset_points[0].x + offset_points[1].x) as f32 / 2.0,
+                (offset_points[0].y + offset_points[1].y) as f32 / 2.0,
+            ),
+            (
+                (offset_points[2].x + offset_points[3].x) as f32 / 2.0,
+                (offset_points[2].y + offset_points[3].y) as f32 / 2.0,
+            ),
+        )
+    } else {
+        // Edges 1-2 and 3-0 are the longer pair
+        (
+            (
+                (offset_points[1].x + offset_points[2].x) as f32 / 2.0,
+                (offset_points[1].y + offset_points[2].y) as f32 / 2.0,
+            ),
+            (
+                (offset_points[3].x + offset_points[0].x) as f32 / 2.0,
+                (offset_points[3].y + offset_points[0].y) as f32 / 2.0,
+            ),
+        )
+    };
+
+    draw_dashed_line(color_preview, mid_a, mid_b, red);
 }
 
 /// Process the `BinaryFusion` step: ROI extraction, dual-axis unwrapping,
@@ -316,7 +334,6 @@ pub(crate) fn process_binary_fusion(
             local_height: bbox_h,
             angle_rad: roi_rect_low_res.angle_rad,
             radius: best_roi.width() as f32 / 2.0,
-            focal_length_px: inter.focal_length_px,
         };
 
         // Direct tilt-aware Unwrapping
@@ -379,10 +396,10 @@ pub(crate) fn process_binary_fusion(
         // VERT_UNWRAP corrects height curvature → its major axis = authentic height.
         // We extract major length here for dimension assignment AND for t-axis rescaling.
         let mut vert_major_px: Option<f32> = None;
-        if let Some((mut box_points, _contour)) = get_tight_bounds(&vert_unwrapped) {
+        if let Some((box_points, _contour)) = get_tight_bounds(&vert_unwrapped) {
             let (major, minor, _angle, _cx, _cy) = compute_rect_metrics(&box_points);
 
-            draw_panel_bounds(&mut color_preview, &mut box_points, x1, y1);
+            draw_panel_bounds(&mut color_preview, &box_points, x1, y1);
 
             vert_major_px = Some(major);
 
@@ -412,10 +429,10 @@ pub(crate) fn process_binary_fusion(
         // and its contour provides accurate radial (r) values for volume integration.
         // The axial (t) coordinates are rescaled by vert_major/horiz_major to fuse
         // the corrected height from VERT_UNWRAP.
-        if let Some((mut box_points, contour)) = get_tight_bounds(&horiz_unwrapped) {
+        if let Some((box_points, contour)) = get_tight_bounds(&horiz_unwrapped) {
             let (major, minor, angle, cx, cy) = compute_rect_metrics(&box_points);
 
-            draw_panel_bounds(&mut color_preview, &mut box_points, x3, y3);
+            draw_panel_bounds(&mut color_preview, &box_points, x3, y3);
 
             // Dual-view fusion: rescale t-axis so axial coordinates match
             // the perspective-corrected height from VERT_UNWRAP.
@@ -481,7 +498,6 @@ pub(crate) fn process_binary_fusion(
             context_image: Some(best_roi.clone()),
             roi_image: Some(best_roi),
             original_high_res: inter.original_high_res.clone(),
-            focal_length_px: inter.focal_length_px,
             transform: Some(transform),
             metrics: calculated_metrics,
         })

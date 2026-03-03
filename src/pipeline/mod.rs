@@ -55,8 +55,6 @@ pub(crate) struct Intermediate {
     pub(crate) roi_image: Option<Arc<DynamicImage>>,
     /// Original High Resolution Image (for FFT)
     pub(crate) original_high_res: Option<Arc<DynamicImage>>,
-    /// Extracted from EXIF (FocalLength * Px/Unit). Required for Perspective Correction.
-    pub(crate) focal_length_px: Option<f32>,
     /// Persisted coordinate transform for mapping points back to original image
     #[allow(dead_code)]
     pub(crate) transform: Option<CoordinateTransform>,
@@ -75,7 +73,6 @@ pub(crate) struct CoordinateTransform {
     pub local_height: u32,
     pub angle_rad: f32,
     pub radius: f32,
-    pub focal_length_px: Option<f32>,
 }
 
 const COIN_RADIUS_MM: f32 = 12.5;
@@ -117,7 +114,6 @@ impl Intermediate {
                         context_image: None,
                         roi_image: None,
                         original_high_res: self.original_high_res.clone(),
-                        focal_length_px: self.focal_length_px,
                         transform: None,
                         metrics: None,
                     })
@@ -139,7 +135,6 @@ impl Intermediate {
                         context_image: Some(Arc::new(DynamicImage::ImageLuma8(smoothed_luma))),
                         roi_image: None,
                         original_high_res: self.original_high_res.clone(),
-                        focal_length_px: self.focal_length_px,
                         transform: None,
                         metrics: None,
                     })
@@ -161,7 +156,6 @@ impl Intermediate {
                         context_image: self.context_image.clone(),
                         roi_image: None,
                         original_high_res: self.original_high_res.clone(),
-                        focal_length_px: self.focal_length_px,
                         transform: None,
                         metrics: None,
                     })
@@ -183,7 +177,6 @@ impl Intermediate {
                         context_image: self.context_image.clone(), // Keep smoothed image for Step 5 crop
                         roi_image: None,
                         original_high_res: self.original_high_res.clone(),
-                        focal_length_px: self.focal_length_px,
                         transform: None,
                         metrics: None,
                     })

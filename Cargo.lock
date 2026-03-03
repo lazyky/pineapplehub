@@ -2927,7 +2927,6 @@ dependencies = [
  "image-debug-utils",
  "imageproc",
  "js-sys",
- "kamadak-exif",
  "log",
  "num-traits",
  "rfd",

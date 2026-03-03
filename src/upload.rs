@@ -172,116 +172,8 @@ pub(crate) fn upload() -> impl Straw<Box<Option<Intermediate>>, Progress, Error>
             let () = progress.send(Progress::Resizing).await;
             TimeoutFuture::new(200).await;
 
-            let mut focal_length_px = None;
-
-            // EXIF Parsing
-            let exif_reader = exif::Reader::new();
-            if let Ok(exif_data) = exif_reader.read_from_container(&mut Cursor::new(&buffer)) {
-                use exif::{In, Tag};
-
-                // Get Focal Length
-                let fl_val = exif_data
-                    .get_field(Tag::FocalLength, In::PRIMARY)
-                    .and_then(|f| f.value.get_uint(0));
-
-                // Get Resolution (PlaneXResolution or estimate from 35mm equiv)
-                // If FocalPlaneXResolution exists (pixels per unit), we need FocalPlaneResolutionUnit (2=inch, 3=cm).
-                // Standard is usually inches.
-
-                // Strategy A: FocalPlaneXResolution
-                let _resolution_val = exif_data
-                    .get_field(Tag::FocalPlaneXResolution, In::PRIMARY)
-                    .and_then(|f| f.value.get_uint(0));
-
-                let _res_unit_val = exif_data
-                    .get_field(Tag::FocalPlaneResolutionUnit, In::PRIMARY)
-                    .and_then(|f| f.value.get_uint(0))
-                    .unwrap_or(2); // Default to inches
-
-                if let Some(_fl_mm_u32) = fl_val {
-                    // Note: EXIF FocalLength is usually rational, get_uint might fail if it's not integer?
-                    // kamadak-exif handles rational to uint/float conversion via helper methods usually,
-                    // but `get_uint` returns u32. Let's try to get float to be safe.
-                    // Actually `get_uint` works if value is integer. Rationals are common.
-                    // Better use match on value.
-                }
-
-                // Simplified parsing using display value parsing or direct value access
-                // Let's iterate fields to find them more robustly or use robust accessors.
-
-                // Re-implementation with correct kamadak-exif usage
-                let focal_len = exif_data
-                    .get_field(Tag::FocalLength, In::PRIMARY)
-                    .and_then(|f| match f.value {
-                        exif::Value::Rational(ref v) if !v.is_empty() => Some(v[0].to_f64()),
-                        exif::Value::Float(ref v) if !v.is_empty() => Some(v[0] as f64),
-                        _ => None,
-                    });
-
-                let plane_x_res = exif_data
-                    .get_field(Tag::FocalPlaneXResolution, In::PRIMARY)
-                    .and_then(|f| match f.value {
-                        exif::Value::Rational(ref v) if !v.is_empty() => Some(v[0].to_f64()),
-                        exif::Value::Float(ref v) if !v.is_empty() => Some(v[0] as f64),
-                        _ => None,
-                    });
-
-                let res_unit = exif_data
-                    .get_field(Tag::FocalPlaneResolutionUnit, In::PRIMARY)
-                    .and_then(|f| match f.value {
-                        exif::Value::Short(ref v) if !v.is_empty() => Some(v[0]),
-                        _ => None,
-                    })
-                    .unwrap_or(2); // 2 = inches, 3 = cm
-
-                if let Some(fl) = focal_len {
-                    if let Some(res) = plane_x_res {
-                        // Focal Length (mm) * Resolution (px/unit) * UnitConversion
-                        // Unit 2 (Inch): res is px/inch.  1 inch = 25.4 mm.
-                        // f_px = fl_mm * (res / 25.4)
-                        let conversion = match res_unit {
-                            2 => 1.0 / 25.4,
-                            3 => 1.0 / 10.0,
-                            _ => 1.0 / 25.4, // Assume inch if unknown
-                        };
-                        focal_length_px = Some((fl * res * conversion) as f32);
-
-                        log::info!(
-                            "EXIF: FL={}mm, Res={}, Unit={}, f_px={}",
-                            fl,
-                            res,
-                            res_unit,
-                            focal_length_px.unwrap()
-                        );
-                    } else {
-                        // Strategy B: 35mm Equivalent
-                        // If we know it's 35mm equiv, we need sensor size...
-                        // Without sensor size or resolution plane, we can't get accurate pixels.
-                        // But maybe we can guess if we assume standard sensor width? No, too risky.
-                        // Many phones write FocalPlaneXResolution.
-
-                        // Fallback: If 35mm equiv is known, and we assume standard 36mm width for 35mm film...
-                        // fl_35 / 36mm = f_px / image_width_px
-                        // => f_px = fl_35 * image_width_px / 36.0
-                        let fl_35 = exif_data
-                            .get_field(Tag::FocalLengthIn35mmFilm, In::PRIMARY)
-                            .and_then(|f| match f.value {
-                                exif::Value::Short(ref v) if !v.is_empty() => Some(v[0] as f64),
-                                exif::Value::Long(ref v) if !v.is_empty() => Some(v[0] as f64),
-                                _ => None,
-                            });
-
-                        log::info!("[Upload] Checking 35mm equiv: {:?}", fl_35);
-
-                        if let Some(fl35) = fl_35 {
-                            // We need original image width — will get it from the decoded image below.
-                            // Store fl35 for later calculation.
-                            focal_length_px = Some(fl35 as f32); // Temporary, recalculated below
-                        }
-                    }
-                } else {
-                    log::info!("[Upload] No FocalLength found in EXIF.");
-                }
+            if total_size == 0 {
+                return Err(Error::General("Selected file is empty".into()));
             }
 
             // Single decode: avoids redundant ImageReader parse for dimensions + full decode
@@ -289,36 +181,6 @@ pub(crate) fn upload() -> impl Straw<Box<Option<Intermediate>>, Progress, Error>
                 .with_guessed_format()
                 .expect("Image format detection failed")
                 .decode()?;
-
-            // If focal_length_px was set from 35mm equiv (temporary), recalculate with actual width
-            if let Some(fl_temp) = focal_length_px {
-                // Check if it was set from the 35mm path (fl35 stored directly, not yet scaled)
-                // The FocalPlaneXResolution path already computed the final value,
-                // so we only recalculate if the value matches an unscaled fl35.
-                let fl_35_field = exif::Reader::new()
-                    .read_from_container(&mut Cursor::new(original_high_res.as_bytes()))
-                    .ok()
-                    .and_then(|e| {
-                        e.get_field(exif::Tag::FocalLengthIn35mmFilm, exif::In::PRIMARY)
-                            .and_then(|f| match f.value {
-                                exif::Value::Short(ref v) if !v.is_empty() => Some(v[0] as f32),
-                                exif::Value::Long(ref v) if !v.is_empty() => Some(v[0] as f32),
-                                _ => None,
-                            })
-                    });
-                // If the temp value matches the raw fl35 (i.e., it wasn't from FocalPlaneXResolution),
-                // then apply the 35mm conversion
-                if fl_35_field == Some(fl_temp) {
-                    let width = original_high_res.width();
-                    focal_length_px = Some(fl_temp * width as f32 / 36.0);
-                    log::info!(
-                        "EXIF (35mm): FL35={}, W={}, f_px={}",
-                        fl_temp,
-                        width,
-                        focal_length_px.unwrap()
-                    );
-                }
-            }
 
             let image = original_high_res.resize(1024, 1024, imageops::Lanczos3);
 
@@ -334,7 +196,6 @@ pub(crate) fn upload() -> impl Straw<Box<Option<Intermediate>>, Progress, Error>
                 context_image: None,
                 roi_image: None,
                 original_high_res: Some(Arc::new(original_high_res)),
-                focal_length_px,
                 transform: None,
                 metrics: None,
             })))

@@ -233,10 +233,6 @@ pub(crate) fn process_binary_fusion(
 
     // Extract ROI
     if let Some(roi_rect_low_res) = roi_rect_low_res {
-        let focal_length = inter.focal_length_px.ok_or(Error::General(
-            "Missing EXIF Focal Length. Cannot perform perspective correction.".into(),
-        ))?;
-
         let gray_original = if let Some(ref hr) = inter.original_high_res {
             hr.to_luma8()
         } else {
@@ -320,7 +316,7 @@ pub(crate) fn process_binary_fusion(
             local_height: bbox_h,
             angle_rad: roi_rect_low_res.angle_rad,
             radius: best_roi.width() as f32 / 2.0,
-            focal_length_px: focal_length,
+            focal_length_px: inter.focal_length_px,
         };
 
         // Direct tilt-aware Unwrapping

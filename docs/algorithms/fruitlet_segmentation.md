@@ -44,6 +44,8 @@ $$B_{closed} = B \oplus \text{disk}(2) \ominus \text{disk}(2)$$
 
 $$B_{open} = B_{closed} \ominus \text{disk}(3) \oplus \text{disk}(3)$$
 
+> The $L_2$ (Euclidean) structuring element produces an isotropic circular disk, which is essential for coin detection — an anisotropic element would systematically distort the circularity metric $\kappa$.
+
 4.  **Contour Finding with Straight-Edge Rejection** (`remove_hypotenuse`): Contours whose boundary contains long straight segments (indicative of rulers or other rectilinear objects) are discarded. The detection threshold is 5.0 pixels.
 
 #### 1.3 Scale Calibration (Coin Detection)
@@ -168,7 +170,7 @@ The `VERT_UNWRAP` image provides the physically accurate representation of the f
 
 $$I_{horiz} = \texttt{unwrap}(\texttt{rot90}(I_{roi})) \qquad [f = r = H_{roi}]$$
 
-After rotation the poles lie at the lateral extremities of $I_{rot}$. The unwrapper, now acting with $f = r = H_{roi} \geq W_{roi}$, applies a proportionally stronger stretch — eliminating the vertical (longitudinal) foreshortening.
+After rotation, the fruit's rotation axis (originally vertical) now lies along the horizontal direction of $I_{rot}$. The poles — originally at the top and bottom — are repositioned to the lateral extremities. The unwrapper, acting with $f = r = H_{roi} \geq W_{roi}$, applies a proportionally stronger horizontal stretch that eliminates the foreshortening along the fruit's rotation axis.
 
 The `HORIZ_UNWRAP` image provides the physically accurate representation of the fruit's **true width**.
 
@@ -177,7 +179,7 @@ The `HORIZ_UNWRAP` image provides the physically accurate representation of the 
 For each of the two unwrapped images, the following pipeline is applied to extract the minimal bounding geometry:
 
 1.  **Global Otsu threshold** → binary mask.
-2.  **0.25× downscale** (nearest-neighbour), followed by morphological Close (radius 2, $L_\infty$) then Open (radius 3, $L_\infty$), then **4× upscale** back to original resolution. This multi-scale approach suppresses internal noise while preserving the overall fruit outline.
+2.  **0.25× downscale** (nearest-neighbour), followed by morphological Close (radius 2, $L_\infty$) then Open (radius 3, $L_\infty$), then **4× upscale** back to original resolution. This multi-scale approach suppresses internal noise while preserving the overall fruit outline. The $L_\infty$ (Chebyshev / square) structuring element is chosen here for computational efficiency on the downscaled image; at 0.25× resolution the distinction between $L_2$ and $L_\infty$ kernels is negligible relative to the fruit's overall outline scale.
 3.  **Largest contour** by perimeter length is selected.
 4.  **Minimum-area rectangle** (`min_area_rect`) of the largest contour: yields major axis length $\ell_{major}$ and minor axis length $\ell_{minor}$, and major-axis orientation $\varphi$.
 

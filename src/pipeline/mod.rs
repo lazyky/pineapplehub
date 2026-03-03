@@ -75,7 +75,7 @@ pub(crate) struct CoordinateTransform {
     pub local_height: u32,
     pub angle_rad: f32,
     pub radius: f32,
-    pub focal_length_px: f32,
+    pub focal_length_px: Option<f32>,
 }
 
 const COIN_RADIUS_MM: f32 = 12.5;

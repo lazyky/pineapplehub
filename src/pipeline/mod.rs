@@ -33,6 +33,21 @@ pub(crate) enum Step {
     FruitletCounting, // Step 6 (Fruitlet Eye Segmentation & Counting)
 }
 
+impl Step {
+    /// Human-readable label for UI display.
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Original => "0. Original",
+            Self::Smoothing => "1. Smoothing",
+            Self::ScaleCalibration => "2. Scale Calibration",
+            Self::Binary => "3. Texture Patch",
+            Self::BinaryFusion => "4. Binary Fusion",
+            Self::RoiExtraction => "5. ROI Extraction & Unwrap",
+            Self::FruitletCounting => "6. Fruitlet Counting",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct FruitletMetrics {
     pub major_length: f32,
@@ -225,12 +240,15 @@ impl Intermediate {
 
     // UI Card rendering remains largely same but updated for Step enum
     pub(crate) fn card(&self, now: Instant) -> Element<'_, Message> {
+        use iced::widget::{row, text};
+
         let image = {
             let thumbnail: Element<'_, _> = if let Preview::Ready { result_img, .. } = &self.preview
             {
                 float(
                     image(dynamic_image_to_handle(&result_img.img))
                         .width(Fill)
+                        .height(200)
                         .content_fit(ContentFit::Contain)
                         .opacity(result_img.fade_in.interpolate(0.0, 1.0, now)),
                 )
@@ -255,7 +273,7 @@ impl Intermediate {
             if let Some(blurhash) = self.preview.blurhash(now) {
                 let blurhash = image(&blurhash.handle)
                     .width(Fill)
-                    .height(Fill)
+                    .height(200)
                     .content_fit(ContentFit::Fill)
                     .opacity(blurhash.fade_in.interpolate(0.0, 1.0, now));
 
@@ -269,24 +287,29 @@ impl Intermediate {
             .on_enter(Message::ThumbnailHovered(self.current_step.clone(), true))
             .on_exit(Message::ThumbnailHovered(self.current_step.clone(), false));
 
-        let decorated_card: Element<'_, Message> =
-            if matches!(self.current_step, Step::RoiExtraction) {
-                use iced::widget::{row, text};
-                let title_bar = container(
-                    row![
-                        text("Vertical Unwrap").width(Fill).center(),
-                        text("Original Rect").width(Fill).center(),
-                        text("Horizontal Unwrap").width(Fill).center(),
-                    ]
-                    .width(Fill),
-                )
-                .padding(10)
-                .style(container::dark);
+        let mut title_col = iced::widget::column![
+            text(self.current_step.label()).size(12),
+        ].spacing(2);
 
-                iced::widget::column![title_bar, card].into()
-            } else {
-                card.into()
-            };
+        // RoiExtraction gets additional sub-column labels
+        if matches!(self.current_step, Step::RoiExtraction) {
+            title_col = title_col.push(
+                row![
+                    text("Vert. Unwrap").size(10).width(Fill).center(),
+                    text("Orig. Rect").size(10).width(Fill).center(),
+                    text("Horiz. Unwrap").size(10).width(Fill).center(),
+                ]
+                .width(Fill)
+                .spacing(4),
+            );
+        }
+
+        let title_bar = container(title_col)
+            .padding(4)
+            .style(container::dark);
+
+        let decorated_card: Element<'_, Message> =
+            iced::widget::column![title_bar, card].spacing(0).into();
 
         let is_result = matches!(self.preview, Preview::Ready { .. });
 

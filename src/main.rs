@@ -436,11 +436,17 @@ impl App {
                         .padding(40),
                 );
             } else if !self.intermediates.is_empty() {
-                // Single-image debug mode: show step-by-step pipeline cards
+                // Show step-by-step pipeline cards (skip Original — shown in left column)
+                let cards: Vec<_> = self
+                    .intermediates
+                    .iter()
+                    .filter(|i| i.current_step != Step::Original)
+                    .map(|i| i.card(self.now))
+                    .collect();
                 col = col.push(
                     scrollable(
-                        grid(self.intermediates.iter().map(|i| i.card(self.now)))
-                            .columns(1)
+                        grid(cards)
+                            .columns(2)
                             .spacing(5),
                     ),
                 );

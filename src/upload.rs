@@ -1,5 +1,4 @@
-use crate::{Intermediate, Message, Preview, Step, error::Error};
-use gloo_timers::future::TimeoutFuture;
+use crate::{Intermediate, Message, Preview, Step, error::Error, js_interop::FileEntry};
 use iced::{
     Element, Task, task,
     time::Instant,
@@ -14,7 +13,7 @@ use std::{io::Cursor, sync::Arc};
 #[derive(Debug, Clone)]
 pub(crate) enum Update {
     Uploading(Progress),
-    Finished(Result<Box<Option<Intermediate>>, Error>),
+    Finished(Result<Box<Vec<FileEntry>>, Error>),
 }
 
 pub(crate) enum State {
@@ -23,7 +22,7 @@ pub(crate) enum State {
         progress: Progress,
         _task: task::Handle,
     },
-    Finished(Box<Intermediate>),
+    Finished(Vec<FileEntry>),
     Errored,
 }
 
@@ -42,18 +41,30 @@ impl Upload {
         Self { state: State::Idle }
     }
 
-    pub(crate) fn is_animating(&self, now: Instant) -> bool {
-        match &self.state {
-            State::Finished(i) => i.preview.is_animating(now),
-            _ => false,
-        }
+    pub(crate) fn is_animating(&self, _now: Instant) -> bool {
+        false
     }
 
-    pub(crate) fn start(&mut self) -> Task<Update> {
+    pub(crate) fn start_files(&mut self) -> Task<Update> {
         match self.state {
             State::Idle | State::Finished(..) | State::Errored => {
                 let (task, handle) =
-                    Task::sip(upload(), Update::Uploading, Update::Finished).abortable();
+                    Task::sip(upload_files(), Update::Uploading, Update::Finished).abortable();
+                self.state = State::Uploading {
+                    progress: Progress::Progress(0.0),
+                    _task: handle.abort_on_drop(),
+                };
+                task
+            }
+            State::Uploading { .. } => Task::none(),
+        }
+    }
+
+    pub(crate) fn start_directory(&mut self) -> Task<Update> {
+        match self.state {
+            State::Idle | State::Finished(..) | State::Errored => {
+                let (task, handle) =
+                    Task::sip(upload_directory(), Update::Uploading, Update::Finished).abortable();
                 self.state = State::Uploading {
                     progress: Progress::Progress(0.0),
                     _task: handle.abort_on_drop(),
@@ -71,10 +82,12 @@ impl Upload {
                     *progress = new_progress;
                 }
                 Update::Finished(result) => {
-                    self.state = if let Ok(boxed_opt) = result {
-                        match *boxed_opt {
-                            Some(i) => State::Finished(Box::new(i)),
-                            None => State::Idle,
+                    self.state = if let Ok(boxed_entries) = result {
+                        let entries = *boxed_entries;
+                        if entries.is_empty() {
+                            State::Idle
+                        } else {
+                            State::Finished(entries)
                         }
                     } else {
                         State::Errored
@@ -92,11 +105,13 @@ impl Upload {
                     column![progress_bar(0.0..=100.0, *p), text!("Uploading: {p}%")]
                 }
                 Progress::Resizing => {
-                    column![progress_bar(0.0..=100.0, 100.0), text!("Resizing...")]
+                    column![progress_bar(0.0..=100.0, 100.0), text!("Loading...")]
                 }
             },
-
-            State::Finished(..) => column![progress_bar(0.0..=100.0, 100.0), text!("Done.")],
+            State::Finished(entries) => column![
+                progress_bar(0.0..=100.0, 100.0),
+                text!("{} file(s) loaded.", entries.len())
+            ],
             State::Errored => column![
                 progress_bar(0.0..=100.0, 0.0),
                 text!("Something went wrong.")
@@ -106,100 +121,73 @@ impl Upload {
     }
 }
 
-/// Upload and resizing the image.
-/// Returns an `Option<Intermediate>` which is `None` if the upload was cancelled.
-///
-/// Typically, this should be split into two functions to avoid [long method](https://refactoring.guru/smells/long-method),
-/// but for iced, there's no proper [`Task`](https://docs.iced.rs/iced/struct.Task.html#implementations) type for such two consecutive operations.
-pub(crate) fn upload() -> impl Straw<Box<Option<Intermediate>>, Progress, Error> {
+/// Upload multiple files via the browser file picker.
+pub(crate) fn upload_files() -> impl Straw<Box<Vec<FileEntry>>, Progress, Error> {
     sipper(async move |mut progress| {
-        if let Some(file) = AsyncFileDialog::new().pick_file().await {
-            let js_file = file.inner();
+        if let Some(files) = AsyncFileDialog::new()
+            .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "tiff", "tif"])
+            .pick_files()
+            .await
+        {
+            let total = files.len();
+            let mut entries = Vec::with_capacity(total);
 
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let total_size = js_file.size() as usize;
-            if total_size == 0 {
-                return Err(Error::General("Selected file is empty".into()));
-            }
-            let () = progress.send(Progress::Progress(0.0)).await;
+            for (i, file) in files.into_iter().enumerate() {
+                let name = file.file_name();
+                let data = file.read().await;
 
-            let mut loaded = 0;
-            let mut buffer = Vec::with_capacity(total_size);
+                entries.push(FileEntry { name, data });
 
-            let chunk_size = match total_size {
-                0..=500_000 => 16 * 1024,         // Small:   16KB
-                500_001..=5_000_000 => 64 * 1024, // Medium:  64KB
-                _ => 128 * 1024,                  // Large:   128KB
-            };
-            let mut start = 0;
-
-            while start < total_size {
-                let end = (start + chunk_size).min(total_size);
-                #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-                let chunk = js_file
-                    .slice_with_i32_and_i32(start as i32, end as i32)
-                    .expect("File.slice failed");
-                let array_buffer = wasm_bindgen_futures::JsFuture::from(chunk.array_buffer())
-                    .await
-                    .map_err(|js_value| {
-                        let error_str = js_value
-                            .as_string()
-                            .unwrap_or_else(|| format!("Unrecognized JS error: {js_value:?}"));
-                        Error::Read(error_str)
-                    })?;
-                let chunk_data = js_sys::Uint8Array::new(&array_buffer).to_vec();
-
-                buffer.extend_from_slice(&chunk_data);
-                loaded += chunk_data.len();
-                start = end;
-
-                if loaded % chunk_size == 0 || loaded == total_size {
-                    let () = progress
-                        .send(Progress::Progress(
-                            #[allow(clippy::cast_precision_loss)]
-                            {
-                                loaded as f32 / total_size as f32 * 100.0
-                            },
-                        ))
-                        .await;
-                }
+                #[allow(clippy::cast_precision_loss)]
+                let pct = ((i + 1) as f32 / total as f32) * 100.0;
+                let () = progress.send(Progress::Progress(pct)).await;
             }
 
-            // Here, the rendering will be blocked since there's a heavy calculation though the signal has been sent.
-            // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model
-            // The ugly solution maybe can be solved by [`wasm_bindgen_spawn`](https://docs.rs/wasm-bindgen-spawn/latest/wasm_bindgen_spawn)
-            TimeoutFuture::new(100).await;
-            let () = progress.send(Progress::Resizing).await;
-            TimeoutFuture::new(200).await;
-
-            // Single decode: avoids redundant ImageReader parse for dimensions + full decode
-            let original_high_res = ImageReader::new(Cursor::new(buffer))
-                .with_guessed_format()
-                .expect("Image format detection failed")
-                .decode()?;
-
-            let image = original_high_res.resize(1024, 1024, imageops::Lanczos3);
-
-            let preview = Preview::ready(image, Instant::now());
-
-            Ok(Box::new(Some(Intermediate {
-                current_step: Step::Original,
-                preview,
-                pixels_per_mm: None,
-                binary_image: None,
-                fused_image: None,
-                contours: None,
-                context_image: None,
-                roi_image: None,
-                original_high_res: Some(Arc::new(original_high_res)),
-                transform: None,
-                metrics: None,
-                horiz_contour: None,
-                horiz_rect_metrics: None,
-                scale_factor: None,
-            })))
+            Ok(Box::new(entries))
         } else {
-            Ok(Box::new(None))
+            Ok(Box::new(vec![]))
         }
+    })
+}
+
+/// Upload files from a directory via `showDirectoryPicker()`.
+pub(crate) fn upload_directory() -> impl Straw<Box<Vec<FileEntry>>, Progress, Error> {
+    sipper(async move |mut progress| {
+        let () = progress.send(Progress::Resizing).await;
+
+        let entries = crate::js_interop::pick_directory_files().await?;
+
+        Ok(Box::new(entries))
+    })
+}
+
+/// Decode a `FileEntry` into a resized `Intermediate` for single-image debug mode.
+///
+/// This replicates the old single-file upload behavior where an image is decoded,
+/// resized and wrapped in an `Intermediate` ready for pipeline stepping.
+pub(crate) fn decode_to_intermediate(entry: &FileEntry) -> Result<Intermediate, Error> {
+    let original_high_res = ImageReader::new(Cursor::new(&entry.data))
+        .with_guessed_format()
+        .expect("Image format detection failed")
+        .decode()?;
+
+    let image = original_high_res.resize(1024, 1024, imageops::Lanczos3);
+    let preview = Preview::ready(image, Instant::now());
+
+    Ok(Intermediate {
+        current_step: Step::Original,
+        preview,
+        pixels_per_mm: None,
+        binary_image: None,
+        fused_image: None,
+        contours: None,
+        context_image: None,
+        roi_image: None,
+        original_high_res: Some(Arc::new(original_high_res)),
+        transform: None,
+        metrics: None,
+        horiz_contour: None,
+        horiz_rect_metrics: None,
+        scale_factor: None,
     })
 }

@@ -2916,6 +2916,7 @@ dependencies = [
  "blurhash",
  "console_error_panic_hook",
  "console_log",
+ "futures",
  "gloo-timers",
  "iced",
  "image",

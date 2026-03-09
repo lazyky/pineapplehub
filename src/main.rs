@@ -52,10 +52,8 @@ enum Message {
     /// Single-image debug-mode step-by-step processing
     Process(Result<Intermediate, Error>),
     BlurhashDecoded(Intermediate, EncodedImage),
-    /// A single batch job finished (sequential fallback)
+    /// A single batch job finished; triggers ProcessNext for the next image.
     JobDone(usize, Result<FruitletMetrics, Error>),
-    /// All batch jobs finished in parallel (rayon)
-    BatchDone(Vec<(usize, Result<FruitletMetrics, Error>)>),
 
     // ── UI interaction ──
     SelectJob(usize),
@@ -267,31 +265,48 @@ impl App {
                         job.status = JobStatus::Processing;
                     }
 
-                    // Two-phase pipeline:
-                    // Phase 1 (main thread): decode images sequentially
-                    //   → avoids OOM from concurrent full-res decode
-                    // Phase 2 (rayon workers): process in parallel
-                    //   → CPU-intensive steps run on all cores
-                    return Task::perform(
-                        async move {
-                            use rayon::prelude::*;
+                    // Streaming parallel pipeline:
+                    //   Phase 1 (main thread): decode images sequentially
+                    //   Phase 2 (rayon workers): process in parallel
+                    //   Results stream back as each worker finishes → UI updates per image
+                    return Task::run(iced::stream::channel(num_jobs, move |mut output: futures::channel::mpsc::Sender<Message>| async move {
+                        use futures::SinkExt;
 
-                            // Phase 1: sequential decode on main thread
-                            let prepared: Vec<(usize, Result<pipeline::fast::PreparedImage, Error>)> =
-                                entries_clone.iter().enumerate().map(|(id, entry)| {
-                                    (id, pipeline::fast::prepare_image(entry))
-                                }).collect();
+                        // Phase 1: sequential decode on main thread
+                        let mut prepared = Vec::with_capacity(entries_clone.len());
+                        for (id, entry) in entries_clone.iter().enumerate() {
+                            match pipeline::fast::prepare_image(entry) {
+                                Ok(prep) => prepared.push((id, prep)),
+                                Err(e) => {
+                                    let _ = output.send(Message::JobDone(id, Err(e))).await;
+                                }
+                            }
+                        }
 
-                            // Phase 2: parallel processing in rayon workers
-                            prepared.into_par_iter().map(|(id, prep_result)| {
-                                let result = prep_result.and_then(|prep| {
-                                    pipeline::fast::process_prepared(&prep)
-                                });
-                                (id, result)
-                            }).collect::<Vec<_>>()
-                        },
-                        Message::BatchDone,
-                    );
+                        // Phase 2: spawn rayon tasks, collect results via channel
+                        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+                        let count = prepared.len();
+
+                        for (id, prep) in prepared {
+                            let tx = tx.clone();
+                            rayon::spawn(move || {
+                                let result = pipeline::fast::process_prepared(&prep);
+                                let _ = tx.unbounded_send(Message::JobDone(id, result));
+                            });
+                        }
+                        drop(tx); // close sender so rx ends when all workers finish
+
+                        // Forward results to iced as each worker completes
+                        use futures::StreamExt;
+                        let mut received = 0;
+                        while let Some(msg) = rx.next().await {
+                            let _ = output.send(msg).await;
+                            received += 1;
+                            if received >= count {
+                                break;
+                            }
+                        }
+                    }), |msg| msg);
                 }
                 Task::none()
             }
@@ -304,22 +319,6 @@ impl App {
                         }
                         Err(e) => {
                             job.status = JobStatus::Error(format!("{e}"));
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::BatchDone(results) => {
-                for (id, result) in results {
-                    if let Some(job) = self.jobs.get_mut(id) {
-                        match result {
-                            Ok(metrics) => {
-                                job.metrics = Some(metrics);
-                                job.status = JobStatus::Done;
-                            }
-                            Err(e) => {
-                                job.status = JobStatus::Error(format!("{e}"));
-                            }
                         }
                     }
                 }

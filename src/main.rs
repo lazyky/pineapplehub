@@ -344,6 +344,24 @@ impl App {
             );
         }
 
+        // ESC key to cancel editing (note / metric editors)
+        if self.editing_note.is_some() || self.editing_metric.is_some() {
+            subs.push(
+                iced::event::listen_with(|event, _status, _window| {
+                    use iced::keyboard;
+                    if let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                        key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                        ..
+                    }) = event
+                    {
+                        Some(Message::CancelEdit)
+                    } else {
+                        None
+                    }
+                }),
+            );
+        }
+
         Subscription::batch(subs)
     }
 

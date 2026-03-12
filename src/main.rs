@@ -6,6 +6,7 @@ mod icons;
 mod job;
 mod js_interop;
 mod pipeline;
+mod theme;
 mod ui;
 mod upload;
 mod utils;
@@ -35,7 +36,7 @@ use crate::{
 };
 
 use iced::{
-    Element, Function, Length, Subscription, Task,
+    Color, Element, Function, Length, Subscription, Task,
     time::Instant,
     widget::{
         button, column, container, grid, image, row, scrollable, space, stack, text,
@@ -196,7 +197,7 @@ struct App {
     jobs: Vec<Job>,
     /// Index of the currently selected job for pipeline preview.
     selected_job: Option<usize>,
-    /// Whether the Pipeline Preview column is visible.
+    /// Whether the Pipeline Details column is visible.
     show_pipeline: bool,
 
     /// Single-image debug-mode intermediate steps (reused from old architecture).
@@ -329,7 +330,7 @@ impl App {
             history_panes: iced::widget::pane_grid::State::with_configuration(
                 iced::widget::pane_grid::Configuration::Split {
                     axis: iced::widget::pane_grid::Axis::Vertical,
-                    ratio: 0.25,
+                    ratio: 0.18,
                     a: Box::new(iced::widget::pane_grid::Configuration::Pane(HistoryPane::Sidebar)),
                     b: Box::new(iced::widget::pane_grid::Configuration::Pane(HistoryPane::MainPanel)),
                 },
@@ -482,11 +483,16 @@ impl App {
                     *last = inter.clone();
                 }
 
-                // Update job metrics if final step
+                // Update job metrics if final step — BUT only when doing real
+                // analysis (single-file mode or batch), NOT when doing pipeline
+                // detail preview in batch mode.
                 if inter.current_step == Step::FruitletCounting {
-                    if let Some(job) = self.jobs.first_mut() {
-                        job.metrics = inter.metrics.clone();
-                        job.status = JobStatus::Done;
+                    let is_preview_only = self.show_pipeline && self.jobs.len() > 1;
+                    if !is_preview_only {
+                        if let Some(job) = self.jobs.first_mut() {
+                            job.metrics = inter.metrics.clone();
+                            job.status = JobStatus::Done;
+                        }
                     }
                     return Task::none();
                 }
@@ -1504,62 +1510,65 @@ impl App {
         let favicon_handle = image::Handle::from_bytes(
             include_bytes!("../assets/favicon.png").as_slice(),
         );
+        // PornHub-style logo: "Pineapple" white + "Hub" black-on-orange badge
+        let hub_badge = container(text("Hub").size(18).color(Color::BLACK))
+            .padding([2, 6])
+            .style(theme::hub_badge_style);
+        let logo = button(
+            row![
+                image(favicon_handle).width(26).height(26),
+                text("Pineapple").size(20).color(theme::TEXT_PRIMARY),
+                hub_badge,
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::NavigateTo(Page::Analysis))
+        .style(theme::text_button_style)
+        .padding([4, 8]);
+
         let title_bar = container(
             row![
-                button(
-                    row![
-                        image(favicon_handle).width(20).height(20),
-                        text("PineappleHub").size(16),
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(Message::NavigateTo(Page::Analysis))
-                .style(button::text)
-                .padding(4),
+                logo,
                 space::horizontal().width(Length::Fill),
                 tooltip(
-                    button(text(icons::ICON_HELP).font(icons::ICON_FONT).size(18))
-                        .style(button::text)
-                        .padding(4),
+                    button(text(icons::ICON_HELP).font(icons::ICON_FONT).size(20))
+                        .style(theme::text_button_style)
+                        .padding(6),
                     "Help",
                     tooltip::Position::Bottom,
-                ).style(history_view::tooltip_style),
+                ).style(theme::tooltip_style),
                 tooltip(
-                    button(text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(18))
+                    button(text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(20))
                         .on_press(Message::NavigateTo(Page::History {
                             panel: HistoryPanel::Records,
                             sidebar_open: true,
                         }))
-                        .style(button::text)
-                        .padding(4),
+                        .style(theme::text_button_style)
+                        .padding(6),
                     "History",
                     tooltip::Position::Bottom,
-                ).style(history_view::tooltip_style),
+                ).style(theme::tooltip_style),
                 tooltip(
                     button(
-                        // GitHub is a brand logo absent from Material Symbols.
-                        // include_bytes! PNG is the most pragmatic approach:
-                        // tiny payload, zero-latency compile-time embed, no extra font.
-                        // An alternative (SVG path via iced canvas) offers no real benefit.
                         image(image::Handle::from_bytes(
-                            include_bytes!("../assets/github-mark.png").as_slice(),
+                            include_bytes!("../assets/github-mark-white.png").as_slice(),
                         ))
-                        .width(18)
-                        .height(18),
+                        .width(20)
+                        .height(20),
                     )
                     .on_press(Message::OpenGitHub)
-                    .style(button::text)
-                    .padding(4),
+                    .style(theme::text_button_style)
+                    .padding(6),
                     "GitHub Repository",
                     tooltip::Position::Bottom,
-                ).style(history_view::tooltip_style),
+                ).style(theme::tooltip_style),
             ]
-            .spacing(4)
-            .padding([8, 12])
+            .spacing(8)
+            .padding([14, 20])
             .align_y(iced::Alignment::Center),
         )
-        .style(container::bordered_box)
+        .style(theme::title_bar_style)
         .width(Length::Fill);
 
         // ── Page content ──
@@ -1568,7 +1577,13 @@ impl App {
             Page::History { panel, sidebar_open } => self.view_history(panel, *sidebar_open),
         };
 
-        let mut main_layout = column![title_bar].spacing(0);
+        let mut main_layout = column![
+            title_bar,
+            container(space::horizontal().width(0))
+                .width(Length::Fill)
+                .height(2)
+                .style(theme::accent_separator),
+        ].spacing(0);
 
         // ── Undo toast (placed before page content so it's visible) ──
         if let (Some(msg), Some(cd)) = (&self.undo_toast, self.undo_countdown) {
@@ -1601,11 +1616,7 @@ impl App {
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             )
-            .style(|_theme: &iced::Theme| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.6))),
-                text_color: Some(iced::Color::WHITE),
-                ..Default::default()
-            })
+            .style(theme::overlay_style)
             .width(Length::Fill)
             .height(Length::Fill)
             .center(Length::Fill);
@@ -1618,7 +1629,7 @@ impl App {
     /// Analysis page — the original 3-column layout.
     fn view_analysis(&self) -> Element<'_, Message> {
         // ── Left column: file input + file list ──
-        let mut left_col = column![].spacing(10).width(Length::FillPortion(2));
+        let mut left_col = column![].spacing(12).padding(12).width(Length::FillPortion(3));
 
         // Buttons
         let mut btn_row = row![button("Choose Files").on_press(Message::PickFiles)].spacing(8);
@@ -1669,15 +1680,15 @@ impl App {
                 .into();
 
                 if is_selected {
-                    button(container(row_content).style(container::dark))
-                        .padding(4)
-                        .style(button::text)
+                    button(container(row_content).style(theme::selected_job_style))
+                        .padding([8, 12])
+                        .style(theme::text_button_style)
                         .on_press(Message::SelectJob(job.id))
                         .into()
                 } else {
                     button(row_content)
-                        .padding(4)
-                        .style(button::text)
+                        .padding([8, 12])
+                        .style(theme::text_button_style)
                         .on_press(Message::SelectJob(job.id))
                         .into()
                 }
@@ -1691,11 +1702,11 @@ impl App {
         let mid_col: Element<'_, Message> = if self.show_pipeline {
             let mut col = column![
                 toggler(self.show_pipeline)
-                    .label("Pipeline Preview")
+                    .label("Pipeline Details")
                     .on_toggle(Message::TogglePipeline),
             ]
             .spacing(10)
-            .width(Length::FillPortion(3));
+            .width(Length::FillPortion(5));
 
             if self.selected_job.is_none() {
                 col = col.push(
@@ -1756,7 +1767,7 @@ impl App {
         } else if !self.jobs.is_empty() {
             column![
                 toggler(self.show_pipeline)
-                    .label("Pipeline Preview")
+                    .label("Pipeline Details")
                     .on_toggle(Message::TogglePipeline),
             ]
             .width(Length::Shrink)
@@ -1766,7 +1777,7 @@ impl App {
         };
 
         // ── Right column: results table ──
-        let mut right_col = column![text("Results").size(24)].spacing(8).width(Length::FillPortion(5));
+        let mut right_col = column![text("Results").size(22)].spacing(8).padding(12).width(Length::FillPortion(4));
 
         use history::stats::MetricColumn;
         let tip_hdr = |label: &'static str, tip: &'static str, portion: u16| -> Element<'_, Message> {
@@ -1775,21 +1786,21 @@ impl App {
                 tip,
                 tooltip::Position::Bottom,
             )
-            .style(history_view::tooltip_style)
+            .style(theme::tooltip_style)
             .into()
         };
         let header = row![
             tip_hdr("File", "Source image filename", 3),
-            tip_hdr("H", MetricColumn::Height.description(), 2),
-            tip_hdr("D", MetricColumn::Width.description(), 2),
-            tip_hdr("V", MetricColumn::Volume.description(), 2),
-            tip_hdr("a", MetricColumn::Aeq.description(), 2),
-            tip_hdr("b", MetricColumn::Beq.description(), 2),
-            tip_hdr("S", MetricColumn::SurfaceArea.description(), 2),
-            tip_hdr("Nf", MetricColumn::NTotal.description(), 2),
+            tip_hdr("H", MetricColumn::Height.description(), 1),
+            tip_hdr("D", MetricColumn::Width.description(), 1),
+            tip_hdr("V", MetricColumn::Volume.description(), 1),
+            tip_hdr("a", MetricColumn::Aeq.description(), 1),
+            tip_hdr("b", MetricColumn::Beq.description(), 1),
+            tip_hdr("S", MetricColumn::SurfaceArea.description(), 1),
+            tip_hdr("Nf", MetricColumn::NTotal.description(), 1),
         ]
         .spacing(4);
-        right_col = right_col.push(header);
+        right_col = right_col.push(container(header).style(theme::table_header_style).padding([8, 6]));
 
         let completed_jobs: Vec<&Job> = self
             .jobs
@@ -1804,22 +1815,28 @@ impl App {
                     .padding(20),
             );
         } else {
-            let rows = column(completed_jobs.iter().map(|job| {
+            let rows = column(completed_jobs.iter().enumerate().map(|(idx, job)| {
                 let m = job.metrics.as_ref().unwrap();
-                row![
-                    text(&job.filename).size(12).width(Length::FillPortion(3)),
-                    text(format!("{:.1}", m.major_length)).size(12).width(Length::FillPortion(2)),
-                    text(format!("{:.1}", m.minor_length)).size(12).width(Length::FillPortion(2)),
-                    text(format!("{:.0}", m.volume)).size(12).width(Length::FillPortion(2)),
-                    text(m.a_eq.map_or("-".into(), |v| format!("{v:.1}"))).size(12).width(Length::FillPortion(2)),
-                    text(m.b_eq.map_or("-".into(), |v| format!("{v:.1}"))).size(12).width(Length::FillPortion(2)),
-                    text(m.surface_area.map_or("-".into(), |v| format!("{v:.0}"))).size(12).width(Length::FillPortion(2)),
-                    text(m.n_total.map_or("-".into(), |v| format!("{v}"))).size(12).width(Length::FillPortion(2)),
-                ]
-                .spacing(4)
+                let row_bg = theme::table_row_bg(idx, false, false);
+                container(
+                    row![
+                        text(&job.filename).size(13).width(Length::FillPortion(3)),
+                        text(format!("{:.1}", m.major_length)).size(13).width(Length::FillPortion(1)),
+                        text(format!("{:.1}", m.minor_length)).size(13).width(Length::FillPortion(1)),
+                        text(format!("{:.0}", m.volume)).size(13).width(Length::FillPortion(1)),
+                        text(m.a_eq.map_or("-".into(), |v| format!("{v:.1}"))).size(13).width(Length::FillPortion(1)),
+                        text(m.b_eq.map_or("-".into(), |v| format!("{v:.1}"))).size(13).width(Length::FillPortion(1)),
+                        text(m.surface_area.map_or("-".into(), |v| format!("{v:.0}"))).size(13).width(Length::FillPortion(1)),
+                        text(m.n_total.map_or("-".into(), |v| format!("{v}"))).size(13).width(Length::FillPortion(1)),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                )
+                .style(row_bg)
+                .padding([6, 6])
                 .into()
             }))
-            .spacing(2);
+            .spacing(1);
             right_col = right_col.push(scrollable(rows));
         }
 
@@ -1833,8 +1850,8 @@ impl App {
                 mid_col,
                 scrollable(right_col),
             ]
-            .spacing(10)
-            .padding(10),
+            .spacing(16)
+            .padding(12),
         )
         .into()
     }
@@ -1875,16 +1892,7 @@ impl App {
                                 editing_session_name,
                             ),
                         )
-                        .style(|_theme: &iced::Theme| {
-                            container::Style {
-                                border: iced::Border {
-                                    color: iced::Color::from_rgba(0.5, 0.5, 0.5, 0.3),
-                                    width: 1.0,
-                                    radius: 0.into(),
-                                },
-                                ..Default::default()
-                            }
-                        })
+                        .style(theme::sidebar_style)
                     }
                     HistoryPane::MainPanel => {
                         pane_grid::Content::new(history_view::view_main_content(
@@ -1951,12 +1959,17 @@ impl App {
 // run_pipeline_fast has been moved to pipeline/fast.rs
 // for Web Worker thread safety (no iced types / browser APIs).
 
+fn pineapple_app_theme(_app: &App) -> iced::Theme {
+    theme::pineapple_theme()
+}
+
 fn main() -> iced::Result {
     console_log::init().expect("Initialize logger");
     console_error_panic_hook::set_once();
 
     iced::application::timed(App::new, App::update, App::subscription, App::view)
         .centered()
+        .theme(pineapple_app_theme)
         .font(NOTO_SANS_SC_BYTES)
         .font(icons::ICON_FONT_BYTES)
         .run()

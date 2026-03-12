@@ -15,7 +15,7 @@ use sipper::{Straw, sipper};
 
 use std::sync::Arc;
 
-use crate::{Message, Preview, error::Error, utils::dynamic_image_to_handle};
+use crate::{Message, Preview, error::Error, theme, utils::dynamic_image_to_handle};
 
 use scale_calibration::perform_scale_calibration;
 
@@ -317,7 +317,7 @@ impl Intermediate {
         button(decorated_card)
             .on_press_maybe(is_result.then_some(Message::Open(self.current_step.clone())))
             .padding(0)
-            .style(button::text)
+            .style(theme::text_button_style)
             .into()
     }
 }

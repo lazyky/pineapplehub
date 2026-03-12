@@ -72,6 +72,7 @@ pub(crate) const ICON_BAR_CHART: &str = "\u{E26B}";        // bar_chart
 pub(crate) const ICON_MONITORING: &str = "\u{F190}";        // monitoring (dashboard card)
 pub(crate) const ICON_QUERY_STATS: &str = "\u{E4FC}";      // query_stats (outlier rate)
 pub(crate) const ICON_PERCENT: &str = "\u{EB58}";          // percent
+pub(crate) const ICON_CODE: &str = "\u{E86F}";             // code (GitHub link)
 
 /// Helper: create an icon text element with the given codepoint and size.
 pub(crate) fn icon<'a, Message: 'a>(codepoint: &'a str, size: f32) -> Element<'a, Message> {

@@ -134,6 +134,11 @@ enum Message {
     /// Undo countdown tick (every 1s).
     UndoTick,
 
+    /// Jump to a specific record from the chart click.
+    JumpToRecord(String),
+    /// Tick for highlight flash animation.
+    HighlightTick,
+
     /// No-op (used for smoke tests)
     Noop,
 }
@@ -248,6 +253,14 @@ struct App {
     /// Descriptive statistics per column.
     column_stats: std::collections::HashMap<history::stats::MetricColumn, history::stats::ColumnStats>,
 
+    /// Precomputed parallel coordinates chart data.
+    parallel_coords_chart: ui::parallel_coords::ParallelCoordsChart,
+
+    /// Record ID currently being flash-highlighted (after JumpToRecord).
+    highlight_record_id: Option<String>,
+    /// Remaining flash ticks (counts down to 0; 6 ticks = 3 blinks × on/off).
+    highlight_ticks: u8,
+
     /// Session ID generated for the current batch (None for single-image mode).
     current_session_id: Option<String>,
 
@@ -288,6 +301,9 @@ impl App {
             exported_session_ids: Vec::new(),
             outlier_cells: std::collections::HashMap::new(),
             column_stats: std::collections::HashMap::new(),
+            parallel_coords_chart: ui::parallel_coords::ParallelCoordsChart::default(),
+            highlight_record_id: None,
+            highlight_ticks: 0,
             current_session_id: None,
             history_panes: iced::widget::pane_grid::State::with_configuration(
                 iced::widget::pane_grid::Configuration::Split {
@@ -356,6 +372,14 @@ impl App {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(1))
                     .map(|_| Message::UndoTick),
+            );
+        }
+
+        // Highlight flash animation (300ms per tick, 6 ticks = 1.8s total)
+        if self.highlight_ticks > 0 {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(300))
+                    .map(|_| Message::HighlightTick),
             );
         }
 
@@ -641,6 +665,24 @@ impl App {
 
                 Task::none()
             }
+            Message::JumpToRecord(record_id) => {
+                // Switch to Records panel + start flash animation
+                if let Page::History { panel, .. } = &mut self.page {
+                    *panel = HistoryPanel::Records;
+                }
+                self.highlight_record_id = Some(record_id);
+                self.highlight_ticks = 6; // 3 blinks × (on + off)
+                Task::none()
+            }
+            Message::HighlightTick => {
+                if self.highlight_ticks > 0 {
+                    self.highlight_ticks -= 1;
+                }
+                if self.highlight_ticks == 0 {
+                    self.highlight_record_id = None;
+                }
+                Task::none()
+            }
             Message::Noop => Task::none(),
 
             // ── UI interaction ──
@@ -874,6 +916,12 @@ impl App {
                     self.outlier_cells.extend(outliers);
                     self.column_stats.extend(stats);
                 }
+
+                // Recalculate parallel coords chart
+                self.parallel_coords_chart = ui::parallel_coords::ParallelCoordsChart::new(
+                    &self.current_records, &self.outlier_cells,
+                );
+
                 Task::none()
             }
             Message::ToggleSuspect(record_id, suspect) => {
@@ -890,6 +938,11 @@ impl App {
                             .filter(|r| r.session_id == session_id && r.suspect)
                             .count() as u32;
                     }
+
+                    // Recalculate chart after suspect change
+                    self.parallel_coords_chart = ui::parallel_coords::ParallelCoordsChart::new(
+                        &self.current_records, &self.outlier_cells,
+                    );
 
                     return Task::perform(
                         async move {
@@ -1785,6 +1838,9 @@ impl App {
                             sort_ascending,
                             outlier_cells,
                             column_stats,
+                            &self.parallel_coords_chart,
+                            &self.highlight_record_id,
+                            self.highlight_ticks,
                             true,
                         ))
                     }
@@ -1807,6 +1863,9 @@ impl App {
                 self.sort_ascending,
                 &self.outlier_cells,
                 &self.column_stats,
+                &self.parallel_coords_chart,
+                &self.highlight_record_id,
+                self.highlight_ticks,
                 false,
             );
 

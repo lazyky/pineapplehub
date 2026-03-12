@@ -109,6 +109,9 @@ pub(crate) fn view_main_content<'a>(
     sort_ascending: bool,
     outlier_cells: &'a std::collections::HashMap<String, HashSet<MetricColumn>>,
     column_stats_map: &'a std::collections::HashMap<MetricColumn, crate::history::stats::ColumnStats>,
+    parallel_coords_chart: &'a super::parallel_coords::ParallelCoordsChart,
+    highlight_record_id: &'a Option<String>,
+    highlight_ticks: u8,
     sidebar_open: bool,
 ) -> Element<'a, Message> {
     let tab_bar = view_tab_bar(panel);
@@ -151,9 +154,11 @@ pub(crate) fn view_main_content<'a>(
             sort_column,
             sort_ascending,
             outlier_cells,
+            highlight_record_id,
+            highlight_ticks,
         ),
         HistoryPanel::Statistics => {
-            view_statistics_panel(selected_count, column_stats_map)
+            view_statistics_panel(selected_count, parallel_coords_chart, column_stats_map)
         }
     };
 
@@ -462,6 +467,8 @@ pub(crate) fn view_records_panel<'a>(
     sort_column: Option<SortColumn>,
     sort_ascending: bool,
     outlier_cells: &'a HashMap<String, HashSet<MetricColumn>>,
+    highlight_record_id: &'a Option<String>,
+    highlight_ticks: u8,
 ) -> Element<'a, Message> {
 
     let mut col = column![].spacing(8).padding(8);
@@ -586,8 +593,18 @@ pub(crate) fn view_records_panel<'a>(
                 let m = &record.metrics;
                 let record_outliers = outlier_cells.get(&record.id);
                 let is_suspect = record.suspect;
+                // Flash highlight: on odd ticks, show accent background
+                let is_flash_on = highlight_record_id.as_deref() == Some(&record.id)
+                    && highlight_ticks % 2 == 1;
                 let row_bg = move |theme: &iced::Theme| -> container::Style {
-                    if is_suspect {
+                    if is_flash_on {
+                        container::Style {
+                            background: Some(iced::Background::Color(
+                                iced::Color::from_rgba(0.3, 0.6, 1.0, 0.3),
+                            )),
+                            ..container::transparent(theme)
+                        }
+                    } else if is_suspect {
                         container::Style {
                             background: Some(iced::Background::Color(
                                 iced::Color::from_rgba(1.0, 0.63, 0.0, 0.15),
@@ -894,6 +911,7 @@ fn view_metric_editor<'a>(record_id: &str, metrics: &StoredMetrics) -> Element<'
 
 pub(crate) fn view_statistics_panel<'a>(
     selected_sessions_count: usize,
+    chart: &'a super::parallel_coords::ParallelCoordsChart,
     column_stats: &'a std::collections::HashMap<MetricColumn, crate::history::stats::ColumnStats>,
 ) -> Element<'a, Message> {
     use crate::history::stats::ColumnStats;
@@ -985,6 +1003,20 @@ pub(crate) fn view_statistics_panel<'a>(
         if let Some(stats) = column_stats.get(&mc) {
             col = col.push(stat_row(mc, stats));
         }
+    }
+
+    // Parallel Coordinates Chart
+    if !chart.is_empty() {
+        col = col.push(space::vertical().height(12));
+        col = col.push(
+            row![
+                text(icons::ICON_BAR_CHART).font(icons::ICON_FONT).size(18),
+                text(" Parallel Coordinates").size(16),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        );
+        col = col.push(chart.view());
     }
 
     scrollable(col).height(Length::Fill).into()

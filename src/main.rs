@@ -101,7 +101,9 @@ enum Message {
     SubmitCurrentNote,
     DeleteCurrentNote,
     OpenMetricEditor(String),
-    MetricInputChanged(String, StoredMetrics),
+    /// Metric editor: user changed a field's raw text.
+    /// (field_index, raw_text) — field 0=H, 1=D, 2=a, 3=b
+    MetricInputChanged(usize, String),
     SaveEditedMetric(String, StoredMetrics),
     SubmitCurrentMetric,
     ResetCurrentMetric,
@@ -141,6 +143,8 @@ enum Message {
 
     /// No-op (used for smoke tests)
     Noop,
+    /// Quick filter toggle for Records panel
+    ToggleRecordFilter(RecordFilter),
 }
 
 // ────────────────────────  History Pane  ────────────────────────
@@ -156,6 +160,16 @@ struct PendingDelete {
     sessions: Vec<SessionSummary>,
     records: Vec<AnalysisRecord>,
     sids: Vec<String>,
+}
+
+/// Quick filter for Records panel.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum RecordFilter {
+    #[default]
+    All,
+    SuspectsOnly,
+    NormalOnly,
+    HasNote,
 }
 
 /// Column by which records can be sorted.
@@ -214,6 +228,11 @@ struct App {
     editing_note: Option<(String, String)>,
     /// Current metric editing state: (record_id, current_metrics).
     editing_metric: Option<(String, StoredMetrics)>,
+    /// Raw text buffers for the 4 editable metric fields [H, D, a, b].
+    editing_metric_text: [String; 4],
+
+    /// Quick filter for Records panel.
+    record_filter: RecordFilter,
 
     /// Current session rename editing state: (session_id, current_name).
     editing_session_name: Option<(String, String)>,
@@ -287,6 +306,8 @@ impl App {
             current_records: Vec::new(),
             editing_note: None,
             editing_metric: None,
+            editing_metric_text: Default::default(),
+            record_filter: RecordFilter::default(),
             editing_session_name: None,
             cache_warning: None,
             undo_toast: None,
@@ -684,6 +705,11 @@ impl App {
                 Task::none()
             }
             Message::Noop => Task::none(),
+            Message::ToggleRecordFilter(f) => {
+                // Toggle off if the same filter is pressed again
+                self.record_filter = if self.record_filter == f { RecordFilter::All } else { f };
+                Task::none()
+            }
 
             // ── UI interaction ──
             Message::SelectJob(id) => {
@@ -1052,13 +1078,23 @@ impl App {
                     .find(|r| r.id == record_id)
                     .map(|r| r.metrics.clone());
                 if let Some(m) = metrics {
+                    // Populate raw text buffers from current values
+                    self.editing_metric_text = [
+                        format!("{}", m.major_length),
+                        format!("{}", m.minor_length),
+                        m.a_eq.map_or(String::new(), |v| format!("{v}")),
+                        m.b_eq.map_or(String::new(), |v| format!("{v}")),
+                    ];
                     self.editing_metric = Some((record_id, m));
                     self.editing_note = None;
                 }
                 Task::none()
             }
-            Message::MetricInputChanged(record_id, metrics) => {
-                self.editing_metric = Some((record_id, metrics));
+            Message::MetricInputChanged(field_idx, raw_text) => {
+                // Just update the text buffer; do NOT parse yet.
+                if field_idx < 4 {
+                    self.editing_metric_text[field_idx] = raw_text;
+                }
                 Task::none()
             }
             Message::SaveEditedMetric(record_id, mut metrics) => {
@@ -1124,6 +1160,13 @@ impl App {
             }
             Message::SubmitCurrentMetric => {
                 if let Some((record_id, mut metrics)) = self.editing_metric.take() {
+                    // Parse raw text into metrics
+                    let txt = &self.editing_metric_text;
+                    if let Ok(v) = txt[0].parse::<f32>() { metrics.major_length = v; }
+                    if let Ok(v) = txt[1].parse::<f32>() { metrics.minor_length = v; }
+                    metrics.a_eq = txt[2].parse::<f32>().ok().or(metrics.a_eq);
+                    metrics.b_eq = txt[3].parse::<f32>().ok().or(metrics.b_eq);
+
                     // On first manual edit, snapshot the original computed values
                     if metrics.original.is_none() {
                         if let Some(record) = self.current_records.iter().find(|r| r.id == record_id) {
@@ -1163,6 +1206,13 @@ impl App {
                             record.metrics.b_eq = orig.b_eq;
                             record.metrics.manually_edited = false;
                             // Keep editor open with restored values
+                            let m = &record.metrics;
+                            self.editing_metric_text = [
+                                format!("{}", m.major_length),
+                                format!("{}", m.minor_length),
+                                m.a_eq.map_or(String::new(), |v| format!("{v}")),
+                                m.b_eq.map_or(String::new(), |v| format!("{v}")),
+                            ];
                             self.editing_metric = Some((record_id.clone(), record.metrics.clone()));
                             let record = record.clone();
                             return Task::perform(
@@ -1843,6 +1893,8 @@ impl App {
                             selected_sessions.len(),
                             editing_note,
                             editing_metric,
+                            &self.editing_metric_text,
+                            self.record_filter,
                             search_query,
                             sort_column,
                             sort_ascending,
@@ -1868,6 +1920,8 @@ impl App {
                 self.selected_sessions.len(),
                 &self.editing_note,
                 &self.editing_metric,
+                &self.editing_metric_text,
+                self.record_filter,
                 &self.search_query,
                 self.sort_column,
                 self.sort_ascending,

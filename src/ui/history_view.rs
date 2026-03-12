@@ -104,6 +104,8 @@ pub(crate) fn view_main_content<'a>(
     selected_count: usize,
     editing_note: &'a Option<(String, String)>,
     editing_metric: &'a Option<(String, StoredMetrics)>,
+    editing_metric_text: &'a [String; 4],
+    record_filter: crate::RecordFilter,
     search_query: &'a str,
     sort_column: Option<crate::SortColumn>,
     sort_ascending: bool,
@@ -150,6 +152,8 @@ pub(crate) fn view_main_content<'a>(
             selected_count,
             editing_note,
             editing_metric,
+            editing_metric_text,
+            record_filter,
             search_query,
             sort_column,
             sort_ascending,
@@ -469,6 +473,8 @@ pub(crate) fn view_records_panel<'a>(
     selected_sessions_count: usize,
     editing_note: &'a Option<(String, String)>,
     editing_metric: &'a Option<(String, StoredMetrics)>,
+    editing_metric_text: &'a [String; 4],
+    record_filter: crate::RecordFilter,
     search_query: &'a str,
     sort_column: Option<SortColumn>,
     sort_ascending: bool,
@@ -498,6 +504,15 @@ pub(crate) fn view_records_panel<'a>(
             .filter(|r| r.filename.to_lowercase().contains(&query_lower))
             .collect()
     };
+
+    // Apply quick filter
+    use crate::RecordFilter;
+    match record_filter {
+        RecordFilter::All => {}
+        RecordFilter::SuspectsOnly => { filtered.retain(|r| r.suspect); }
+        RecordFilter::NormalOnly => { filtered.retain(|r| !r.suspect); }
+        RecordFilter::HasNote => { filtered.retain(|r| !r.note.is_empty()); }
+    }
 
     // Sort
     if let Some(sc) = sort_column {
@@ -549,6 +564,27 @@ pub(crate) fn view_records_panel<'a>(
                 .style(button::secondary),
         ]
         .spacing(8),
+    );
+
+    // Quick filter buttons
+    let filter_btn = |label: &'static str, f: RecordFilter| -> Element<'_, Message> {
+        let style = if record_filter == f { button::primary } else { button::secondary };
+        button(text(label).size(11))
+            .on_press(Message::ToggleRecordFilter(f))
+            .style(style)
+            .padding([2, 8])
+            .into()
+    };
+    col = col.push(
+        row![
+            text("Filter:").size(12),
+            filter_btn("All", RecordFilter::All),
+            filter_btn("Suspects", RecordFilter::SuspectsOnly),
+            filter_btn("Normal", RecordFilter::NormalOnly),
+            filter_btn("Noted", RecordFilter::HasNote),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center),
     );
 
     // Sortable header helper — each column gets a tooltip describing its meaning
@@ -699,7 +735,7 @@ pub(crate) fn view_records_panel<'a>(
                 // Inline metric editor
                 if let Some((edit_id, edit_metrics)) = editing_metric {
                     if edit_id == &record.id {
-                        elements.push(view_metric_editor(edit_id, edit_metrics));
+                        elements.push(view_metric_editor(edit_id, editing_metric_text));
                     }
                 }
 
@@ -804,118 +840,81 @@ fn view_note_editor<'a>(record_id: &str, note_text: &str) -> Element<'a, Message
     .into()
 }
 
-fn view_metric_editor<'a>(record_id: &str, metrics: &StoredMetrics) -> Element<'a, Message> {
-    let rid = record_id.to_string();
-    let base = metrics.clone();
+fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, Message> {
+    let fields: [(&str, usize); 4] = [
+        ("H (mm):", 0),
+        ("D (mm):", 1),
+        ("a (mm):", 2),
+        ("b (mm):", 3),
+    ];
 
-    let h_rid = rid.clone();
-    let h_base = base.clone();
-    let w_rid = rid.clone();
-    let w_base = base.clone();
-    let a_rid = rid.clone();
-    let a_base = base.clone();
-    let b_rid = rid.clone();
-    let b_base = base.clone();
+    let mut col = column![].spacing(4).padding(8);
 
-    container(
-        column![
+    for &(label, idx) in &fields {
+        let current_text = texts[idx].clone();
+        let is_valid = current_text.is_empty() || current_text.parse::<f32>().is_ok();
+        let mut input = text_input("", &current_text)
+            .on_input(move |val| Message::MetricInputChanged(idx, val))
+            .on_submit(Message::SubmitCurrentMetric)
+            .width(120);
+        if !is_valid {
+            input = input.style(|theme: &iced::Theme, status| {
+                let mut s = text_input::default(theme, status);
+                s.border.color = iced::Color::from_rgb(1.0, 0.3, 0.3);
+                s.border.width = 2.0;
+                s
+            });
+        }
+        col = col.push(
             row![
-                text("H (mm):").size(13).width(100),
-                text_input("", &format!("{}", metrics.major_length))
-                    .on_input(move |val| {
-                        let mut m = h_base.clone();
-                        if let Ok(v) = val.parse::<f32>() {
-                            m.major_length = v;
-                        }
-                        Message::MetricInputChanged(h_rid.clone(), m)
-                    })
-                    .on_submit(Message::SubmitCurrentMetric)
-                    .width(120),
+                text(label).size(13).width(100),
+                input,
             ]
             .spacing(4),
-            row![
-                text("D (mm):").size(13).width(100),
-                text_input("", &format!("{}", metrics.minor_length))
-                    .on_input(move |val| {
-                        let mut m = w_base.clone();
-                        if let Ok(v) = val.parse::<f32>() {
-                            m.minor_length = v;
-                        }
-                        Message::MetricInputChanged(w_rid.clone(), m)
-                    })
-                    .on_submit(Message::SubmitCurrentMetric)
-                    .width(120),
-            ]
-            .spacing(4),
-            row![
-                text("a (mm):").size(13).width(100),
-                text_input(
-                    "",
-                    &metrics.a_eq.map_or(String::new(), |v| format!("{v}"))
-                )
-                .on_input(move |val| {
-                    let mut m = a_base.clone();
-                    m.a_eq = val.parse::<f32>().ok();
-                    Message::MetricInputChanged(a_rid.clone(), m)
-                })
-                .on_submit(Message::SubmitCurrentMetric)
-                .width(120),
-            ]
-            .spacing(4),
-            row![
-                text("b (mm):").size(13).width(100),
-                text_input(
-                    "",
-                    &metrics.b_eq.map_or(String::new(), |v| format!("{v}"))
-                )
-                .on_input(move |val| {
-                    let mut m = b_base.clone();
-                    m.b_eq = val.parse::<f32>().ok();
-                    Message::MetricInputChanged(b_rid.clone(), m)
-                })
-                .on_submit(Message::SubmitCurrentMetric)
-                .width(120),
-            ]
-            .spacing(4),
-            row![
-                tooltip(
-                    button(
-                        text(icons::ICON_CHECK_CIRCLE).font(icons::ICON_FONT).size(16)
-                    )
-                        .on_press(Message::SubmitCurrentMetric)
-                        .style(button::primary)
-                        .padding(4),
-                    "Save",
-                    tooltip::Position::Bottom,
-                ).style(tooltip_style),
-                tooltip(
-                    button(
-                        text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(16)
-                    )
-                        .on_press(Message::CancelEdit)
-                        .style(button::secondary)
-                        .padding(4),
-                    "Cancel",
-                    tooltip::Position::Bottom,
-                ).style(tooltip_style),
-                tooltip(
-                    button(
-                        text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(16)
-                    )
-                        .on_press(Message::ResetCurrentMetric)
-                        .style(button::danger)
-                        .padding(4),
-                    "Reset to original",
-                    tooltip::Position::Bottom,
-                ).style(tooltip_style),
-            ]
-            .spacing(4),
-        ]
-        .spacing(4)
-        .padding(8),
+        );
+    }
+
+    // Check if all required fields are valid (H and D must parse; a and b may be empty)
+    let can_save = texts[0].parse::<f32>().is_ok()
+        && texts[1].parse::<f32>().is_ok()
+        && (texts[2].is_empty() || texts[2].parse::<f32>().is_ok())
+        && (texts[3].is_empty() || texts[3].parse::<f32>().is_ok());
+
+    let mut save_btn = button(
+        text(icons::ICON_CHECK_CIRCLE).font(icons::ICON_FONT).size(16)
     )
-    .style(container::bordered_box)
-    .into()
+    .style(button::primary)
+    .padding(4);
+    if can_save {
+        save_btn = save_btn.on_press(Message::SubmitCurrentMetric);
+    }
+
+    col = col.push(
+        row![
+            tooltip(save_btn, "Save", tooltip::Position::Bottom).style(tooltip_style),
+            tooltip(
+                button(text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(16))
+                    .on_press(Message::CancelEdit)
+                    .style(button::secondary)
+                    .padding(4),
+                "Cancel",
+                tooltip::Position::Bottom,
+            ).style(tooltip_style),
+            tooltip(
+                button(text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(16))
+                    .on_press(Message::ResetCurrentMetric)
+                    .style(button::danger)
+                    .padding(4),
+                "Reset to original",
+                tooltip::Position::Bottom,
+            ).style(tooltip_style),
+        ]
+        .spacing(4),
+    );
+
+    container(col)
+        .style(container::bordered_box)
+        .into()
 }
 
 // ──────────────────────── Statistics Panel ────────────────────────

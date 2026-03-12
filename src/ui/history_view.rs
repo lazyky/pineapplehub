@@ -17,6 +17,7 @@ use iced::{
 use crate::history::model::{AnalysisRecord, SessionSummary, StoredMetrics};
 use crate::history::store::{CacheWarningLevel, MAX_RECORDS};
 use crate::icons;
+use crate::theme;
 use crate::Message;
 
 // ──────────────────────── Tab Bar ────────────────────────
@@ -45,20 +46,15 @@ pub(crate) fn view_tab_bar<'a>(
                 tab_btn,
                 container(space::horizontal().width(0))
                     .width(Length::Fill)
-                    .height(2)
-                    .style(|_theme: &iced::Theme| container::Style {
-                        background: Some(iced::Background::Color(
-                            iced::Color::from_rgba(0.35, 0.55, 0.95, 1.0),
-                        )),
-                        ..Default::default()
-                    }),
+                    .height(3)
+                    .style(crate::theme::active_tab_underline),
             ]
             .width(Length::Shrink)
             .into()
         } else {
             column![
                 tab_btn,
-                space::vertical().height(2),
+                space::vertical().height(3),
             ]
             .width(Length::Shrink)
             .into()
@@ -82,16 +78,7 @@ pub(crate) fn view_tab_bar<'a>(
         .spacing(4)
         .align_y(iced::Alignment::End),
     )
-    .style(|theme: &iced::Theme| container::Style {
-        border: iced::Border {
-            width: 0.0,
-            ..Default::default()
-        },
-        background: Some(iced::Background::Color(
-            iced::Color::from_rgba(0.5, 0.5, 0.5, 0.08),
-        )),
-        ..container::transparent(theme)
-    })
+    .style(crate::theme::tab_bar_style)
     .padding([0, 8])
     .width(Length::Fill)
     .into()
@@ -130,7 +117,7 @@ pub(crate) fn view_main_content<'a>(
         )
         .width(28)
         .height(28)
-        .style(button::text)
+        .style(theme::text_button_style)
         .on_press(Message::ToggleSidebar),
         if sidebar_open {
             "Hide sidebar"
@@ -190,7 +177,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
     clear_all_confirm: bool,
     editing_session_name: &'a Option<(String, String)>,
 ) -> Element<'a, Message> {
-    let mut col = column![].spacing(8).padding(8).width(Length::Fill);
+    let mut col = column![].spacing(6).padding(12).width(Length::Fill);
 
     // Cache warning banner
     if let Some(warning) = cache_warning {
@@ -216,7 +203,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
             tooltip(
                 button(text(icons::ICON_DELETE).font(icons::ICON_FONT).size(14))
                     .on_press(Message::DeleteSelectedSessions)
-                    .style(button::danger),
+                    .style(theme::danger_button_style),
                 "Delete selected",
                 tooltip::Position::Bottom,
             ).style(tooltip_style),
@@ -225,7 +212,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
             tooltip(
                 button(text(icons::ICON_DOWNLOAD).font(icons::ICON_FONT).size(14))
                     .on_press(Message::ExportSelectedSessions)
-                    .style(button::secondary),
+                    .style(theme::secondary_button_style),
                 "Export selected",
                 tooltip::Position::Bottom,
             ).style(tooltip_style),
@@ -252,7 +239,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
                             .align_y(iced::Alignment::Center),
                         )
                             .on_press(Message::ConfirmDelete)
-                            .style(button::danger),
+                            .style(theme::danger_button_style),
                         button(
                             row![
                                 text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(14),
@@ -261,7 +248,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
                             .align_y(iced::Alignment::Center),
                         )
                             .on_press(Message::CancelDelete)
-                            .style(button::secondary),
+                            .style(theme::secondary_button_style),
                     ]
                     .spacing(8),
                 ]
@@ -407,7 +394,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
                 .align_y(iced::Alignment::Center),
         )
             .on_press(Message::QuickCleanup)
-            .style(button::secondary)
+            .style(theme::cleanup_button_style)
             .width(Length::Fill),
     );
 
@@ -426,7 +413,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
                             .align_y(iced::Alignment::Center),
                         )
                             .on_press(Message::ConfirmClearAll)
-                            .style(button::danger),
+                            .style(theme::danger_button_style),
                         button(
                             row![
                                 text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(14),
@@ -435,7 +422,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
                             .align_y(iced::Alignment::Center),
                         )
                             .on_press(Message::CancelClearAll)
-                            .style(button::secondary),
+                            .style(theme::secondary_button_style),
                     ]
                     .spacing(8),
                 ]
@@ -455,7 +442,7 @@ pub(crate) fn view_sessions_sidebar<'a>(
                 .align_y(iced::Alignment::Center),
             )
                 .on_press(Message::ClearAllHistory)
-                .style(button::danger)
+                .style(theme::danger_button_style)
                 .width(Length::Fill),
         );
     }
@@ -561,7 +548,7 @@ pub(crate) fn view_records_panel<'a>(
                     .align_y(iced::Alignment::Center),
             )
                 .on_press(Message::ExportSelectedSessions)
-                .style(button::secondary),
+                .style(theme::secondary_button_style),
         ]
         .spacing(8),
     );
@@ -604,7 +591,7 @@ pub(crate) fn view_records_panel<'a>(
                 .align_y(iced::Alignment::Center),
             )
             .on_press(Message::SortBy(sc))
-            .style(button::text)
+            .style(theme::text_button_style)
             .padding([2, 4])
             .width(Length::FillPortion(portion)),
             tip,
@@ -630,6 +617,7 @@ pub(crate) fn view_records_panel<'a>(
     col = col.push(header);
 
     // Table rows
+    let mut row_index: usize = 0;
     let rows = column(
         filtered
             .into_iter()
@@ -643,25 +631,9 @@ pub(crate) fn view_records_panel<'a>(
                 // Flash highlight: on odd ticks, show accent background
                 let is_flash_on = highlight_record_id.as_deref() == Some(&record.id)
                     && highlight_ticks % 2 == 1;
-                let row_bg = move |theme: &iced::Theme| -> container::Style {
-                    if is_flash_on {
-                        container::Style {
-                            background: Some(iced::Background::Color(
-                                iced::Color::from_rgba(0.3, 0.6, 1.0, 0.3),
-                            )),
-                            ..container::transparent(theme)
-                        }
-                    } else if is_suspect {
-                        container::Style {
-                            background: Some(iced::Background::Color(
-                                iced::Color::from_rgba(1.0, 0.63, 0.0, 0.15),
-                            )),
-                            ..container::transparent(theme)
-                        }
-                    } else {
-                        container::transparent(theme)
-                    }
-                };
+                let idx = row_index;
+                row_index += 1;
+                let row_bg = crate::theme::table_row_bg(idx, is_suspect, is_flash_on);
 
                 let filename_cell: Element<'_, Message> = if m.manually_edited {
                     row![
@@ -685,18 +657,13 @@ pub(crate) fn view_records_panel<'a>(
                     let is_outlier = outlier_set.contains(&col);
                     let txt = text(value).size(13);
                     let txt = if is_outlier {
-                        txt.color(iced::Color::from_rgba(0.9, 0.15, 0.15, 1.0))
+                        txt.color(crate::theme::OUTLIER_TEXT)
                     } else {
                         txt
                     };
                     if is_outlier {
                         container(txt)
-                            .style(|_theme: &iced::Theme| container::Style {
-                                background: Some(iced::Background::Color(
-                                    iced::Color::from_rgba(1.0, 0.31, 0.31, 0.25),
-                                )),
-                                ..Default::default()
-                            })
+                            .style(crate::theme::outlier_cell_style)
                             .width(Length::FillPortion(portion))
                             .into()
                     } else {
@@ -719,9 +686,11 @@ pub(crate) fn view_records_panel<'a>(
                         container(view_record_actions(record))
                             .width(Length::FillPortion(2)),
                     ]
-                    .spacing(6),
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
                 )
-                .style(row_bg);
+                .style(row_bg)
+                .padding([4, 6]);
 
                 elements.push(row_content.into());
 
@@ -767,7 +736,7 @@ fn view_record_actions(record: &AnalysisRecord) -> Element<'_, Message> {
                     record.id.clone(),
                     !record.suspect,
                 ))
-                .style(button::text)
+                .style(theme::text_button_style)
                 .padding(2),
             suspect_tip,
             tooltip::Position::Bottom,
@@ -775,7 +744,7 @@ fn view_record_actions(record: &AnalysisRecord) -> Element<'_, Message> {
         tooltip(
             button(text(note_icon).font(icons::ICON_FONT).size(16))
                 .on_press(Message::OpenNoteEditor(record.id.clone()))
-                .style(button::text)
+                .style(theme::text_button_style)
                 .padding(2),
             note_tip,
             tooltip::Position::Bottom,
@@ -783,7 +752,7 @@ fn view_record_actions(record: &AnalysisRecord) -> Element<'_, Message> {
         tooltip(
             button(text(icons::ICON_EDIT).font(icons::ICON_FONT).size(16))
                 .on_press(Message::OpenMetricEditor(record.id.clone()))
-                .style(button::text)
+                .style(theme::text_button_style)
                 .padding(2),
             "Edit metrics",
             tooltip::Position::Bottom,
@@ -807,7 +776,7 @@ fn view_note_editor<'a>(record_id: &str, note_text: &str) -> Element<'a, Message
                     text(icons::ICON_CHECK_CIRCLE).font(icons::ICON_FONT).size(16)
                 )
                     .on_press(Message::SubmitCurrentNote)
-                    .style(button::primary)
+                    .style(theme::primary_button_style)
                     .padding(4),
                 "Save",
                 tooltip::Position::Bottom,
@@ -817,7 +786,7 @@ fn view_note_editor<'a>(record_id: &str, note_text: &str) -> Element<'a, Message
                     text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(16)
                 )
                     .on_press(Message::CancelEdit)
-                    .style(button::secondary)
+                    .style(theme::secondary_button_style)
                     .padding(4),
                 "Cancel",
                 tooltip::Position::Bottom,
@@ -827,7 +796,7 @@ fn view_note_editor<'a>(record_id: &str, note_text: &str) -> Element<'a, Message
                     text(icons::ICON_DELETE).font(icons::ICON_FONT).size(16)
                 )
                     .on_press(Message::DeleteCurrentNote)
-                    .style(button::danger)
+                    .style(theme::danger_button_style)
                     .padding(4),
                 "Delete note",
                 tooltip::Position::Bottom,
@@ -858,12 +827,7 @@ fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, M
             .on_submit(Message::SubmitCurrentMetric)
             .width(120);
         if !is_valid {
-            input = input.style(|theme: &iced::Theme, status| {
-                let mut s = text_input::default(theme, status);
-                s.border.color = iced::Color::from_rgb(1.0, 0.3, 0.3);
-                s.border.width = 2.0;
-                s
-            });
+            input = input.style(crate::theme::validation_error_input);
         }
         col = col.push(
             row![
@@ -883,7 +847,7 @@ fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, M
     let mut save_btn = button(
         text(icons::ICON_CHECK_CIRCLE).font(icons::ICON_FONT).size(16)
     )
-    .style(button::primary)
+    .style(theme::primary_button_style)
     .padding(4);
     if can_save {
         save_btn = save_btn.on_press(Message::SubmitCurrentMetric);
@@ -895,7 +859,7 @@ fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, M
             tooltip(
                 button(text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(16))
                     .on_press(Message::CancelEdit)
-                    .style(button::secondary)
+                    .style(theme::secondary_button_style)
                     .padding(4),
                 "Cancel",
                 tooltip::Position::Bottom,
@@ -903,7 +867,7 @@ fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, M
             tooltip(
                 button(text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(16))
                     .on_press(Message::ResetCurrentMetric)
-                    .style(button::danger)
+                    .style(theme::danger_button_style)
                     .padding(4),
                 "Reset to original",
                 tooltip::Position::Bottom,
@@ -913,7 +877,7 @@ fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, M
     );
 
     container(col)
-        .style(container::bordered_box)
+        .style(crate::theme::editor_container_style)
         .into()
 }
 
@@ -973,29 +937,18 @@ pub(crate) fn view_statistics_panel<'a>(
             .spacing(4)
             .align_x(iced::Alignment::Center),
         )
-        .padding([8, 16])
+        .padding([12, 20])
         .width(Length::FillPortion(1))
-        .style(move |theme: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(iced::Color {
-                a: 0.12,
-                ..color
-            })),
-            border: iced::Border {
-                color: iced::Color { a: 0.3, ..color },
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            ..container::transparent(theme)
-        })
+        .style(crate::theme::summary_card_style(color))
         .into()
     };
 
     let rate_color = if outlier_rate > 10.0 {
-        iced::Color::from_rgb(1.0, 0.3, 0.3)
+        crate::theme::DANGER
     } else if outlier_rate > 5.0 {
-        iced::Color::from_rgb(1.0, 0.7, 0.2)
+        crate::theme::WARNING
     } else {
-        iced::Color::from_rgb(0.3, 0.8, 0.5)
+        crate::theme::SUCCESS
     };
 
     col = col.push(
@@ -1067,17 +1020,13 @@ pub(crate) fn view_statistics_panel<'a>(
         ]
         .spacing(4),
     )
-    .style(|theme: &iced::Theme| container::Style {
-        background: Some(iced::Background::Color(
-            iced::Color::from_rgba(0.5, 0.5, 0.5, 0.15),
-        )),
-        ..container::transparent(theme)
-    })
-    .padding([4, 8]);
-    col = col.push(header_row);
+    .style(crate::theme::stats_header_style)
+    .padding([6, 8]);
+    // Wrap descriptive statistics in a section card
+    let mut stats_table = column![header_row].spacing(0);
 
     // One row per metric
-    let stat_row = |mc: MetricColumn, stats: &ColumnStats| -> Element<'_, Message> {
+    let stat_row = |mc: MetricColumn, stats: &ColumnStats, idx: usize| -> Element<'_, Message> {
         let cell = |value: String, portion: u16| -> Element<'_, Message> {
             text(value)
                 .size(13)
@@ -1090,6 +1039,7 @@ pub(crate) fn view_statistics_panel<'a>(
         } else {
             "-".to_string()
         };
+        let row_bg = crate::theme::table_row_bg(idx, false, false);
         container(
             row![
                 text(mc.label())
@@ -1105,28 +1055,45 @@ pub(crate) fn view_statistics_panel<'a>(
             ]
             .spacing(4),
         )
-        .padding([2, 8])
+        .style(row_bg)
+        .padding([4, 8])
         .into()
     };
 
+    let mut stat_idx: usize = 0;
     for mc in MetricColumn::ALL {
         if let Some(stats) = column_stats.get(&mc) {
-            col = col.push(stat_row(mc, stats));
+            stats_table = stats_table.push(stat_row(mc, stats, stat_idx));
+            stat_idx += 1;
         }
     }
 
+    col = col.push(
+        container(stats_table)
+            .style(crate::theme::section_card_style)
+            .padding(4)
+            .width(Length::Fill),
+    );
+
     // Parallel Coordinates Chart
     if !chart.is_empty() {
-        col = col.push(space::vertical().height(12));
         col = col.push(
-            row![
-                text(icons::ICON_BAR_CHART).font(icons::ICON_FONT).size(18),
-                text(" Parallel Coordinates").size(16),
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center),
+            container(
+                column![
+                    row![
+                        text(icons::ICON_BAR_CHART).font(icons::ICON_FONT).size(18),
+                        text(" Parallel Coordinates").size(16),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                    chart.view(),
+                ]
+                .spacing(8)
+                .padding(8),
+            )
+            .style(crate::theme::section_card_style)
+            .width(Length::Fill),
         );
-        col = col.push(chart.view());
     }
 
     scrollable(col).height(Length::Fill).into()
@@ -1152,10 +1119,10 @@ fn view_cache_warning(warning: &CacheWarningLevel) -> Element<'_, Message> {
                         .align_y(iced::Alignment::Center)
                 )
                     .on_press(Message::QuickCleanup)
-                    .style(button::secondary),
+                    .style(theme::secondary_button_style),
                 button(text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(12))
                     .on_press(Message::DismissCacheWarning)
-                    .style(button::text),
+                    .style(theme::text_button_style),
             ]
             .spacing(4)
             .into()
@@ -1175,7 +1142,7 @@ fn view_cache_warning(warning: &CacheWarningLevel) -> Element<'_, Message> {
                         .align_y(iced::Alignment::Center)
                 )
                     .on_press(Message::QuickCleanup)
-                    .style(button::danger),
+                    .style(theme::danger_button_style),
             ]
             .spacing(4)
             .into()
@@ -1193,7 +1160,7 @@ fn view_cache_warning(warning: &CacheWarningLevel) -> Element<'_, Message> {
                             .align_y(iced::Alignment::Center),
                     )
                         .on_press(Message::QuickCleanup)
-                        .style(button::danger),
+                        .style(theme::danger_button_style),
                     button(
                         row![text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(12), text(" Manage History").size(12)]
                             .align_y(iced::Alignment::Center),
@@ -1202,7 +1169,7 @@ fn view_cache_warning(warning: &CacheWarningLevel) -> Element<'_, Message> {
                             panel: HistoryPanel::Records,
                             sidebar_open: true,
                         }))
-                        .style(button::secondary),
+                        .style(theme::secondary_button_style),
                 ]
                 .spacing(4),
             ]
@@ -1212,8 +1179,8 @@ fn view_cache_warning(warning: &CacheWarningLevel) -> Element<'_, Message> {
     };
 
     container(content)
-        .padding(6)
-        .style(container::bordered_box)
+        .padding(8)
+        .style(crate::theme::cache_warning_style)
         .width(Length::Fill)
         .into()
 }
@@ -1232,13 +1199,13 @@ pub(crate) fn view_undo_toast<'a>(
             text(format!("({countdown_secs}s)")).size(12),
             button(text("Undo").size(12))
                 .on_press(Message::UndoDelete)
-                .style(button::primary),
+                .style(theme::primary_button_style),
         ]
         .spacing(8)
         .padding(8)
         .align_y(iced::Alignment::Center),
     )
-    .style(container::bordered_box)
+    .style(crate::theme::undo_toast_style)
     .width(Length::Fill)
     .into()
 }
@@ -1261,10 +1228,10 @@ pub(crate) fn view_export_delete_prompt<'a>() -> Element<'a, Message> {
                         .align_y(iced::Alignment::Center),
                     )
                         .on_press(Message::DeleteExportedSessions)
-                        .style(button::danger),
+                        .style(theme::danger_button_style),
                     button(text("Keep").size(13))
                         .on_press(Message::DismissExportPrompt)
-                        .style(button::secondary),
+                        .style(theme::secondary_button_style),
                 ]
                 .spacing(8),
             ]
@@ -1272,10 +1239,10 @@ pub(crate) fn view_export_delete_prompt<'a>() -> Element<'a, Message> {
             .padding(24)
             .align_x(iced::Alignment::Center),
         )
-        .style(container::bordered_box)
+        .style(crate::theme::dialog_box_style)
         .width(320),
     )
-    .center(Length::Fill)
+    .style(crate::theme::dialog_scrim_style)
     .into()
 }
 
@@ -1296,16 +1263,7 @@ fn format_timestamp(ts: f64) -> String {
 /// Opaque tooltip style: dark background with subtle border, avoids visual
 /// blending with underlying elements.
 pub(crate) fn tooltip_style(_theme: &iced::Theme) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.15))),
-        text_color: Some(iced::Color::WHITE),
-        border: iced::Border {
-            color: iced::Color::from_rgb(0.3, 0.3, 0.3),
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
-    }
+    crate::theme::tooltip_style(_theme)
 }
 
 // Re-export types used in Message

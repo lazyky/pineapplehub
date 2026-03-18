@@ -702,7 +702,7 @@ pub(crate) fn view_records_panel<'a>(
                 }
 
                 // Inline metric editor
-                if let Some((edit_id, edit_metrics)) = editing_metric {
+                if let Some((edit_id, _edit_metrics)) = editing_metric {
                     if edit_id == &record.id {
                         elements.push(view_metric_editor(edit_id, editing_metric_text));
                     }
@@ -809,7 +809,7 @@ fn view_note_editor<'a>(record_id: &str, note_text: &str) -> Element<'a, Message
     .into()
 }
 
-fn view_metric_editor<'a>(record_id: &str, texts: &[String; 4]) -> Element<'a, Message> {
+fn view_metric_editor<'a>(_record_id: &str, texts: &[String; 4]) -> Element<'a, Message> {
     let fields: [(&str, usize); 4] = [
         ("H (mm):", 0),
         ("D (mm):", 1),
@@ -888,7 +888,7 @@ pub(crate) fn view_statistics_panel<'a>(
     selected_sessions_count: usize,
     chart: &'a super::parallel_coords::ParallelCoordsChart,
     column_stats: &'a std::collections::HashMap<MetricColumn, crate::history::stats::ColumnStats>,
-    outlier_cells: &'a std::collections::HashMap<String, HashSet<MetricColumn>>,
+    _outlier_cells: &'a std::collections::HashMap<String, HashSet<MetricColumn>>,
 ) -> Element<'a, Message> {
     use crate::history::stats::ColumnStats;
 
@@ -1266,8 +1266,7 @@ pub(crate) fn tooltip_style(_theme: &iced::Theme) -> container::Style {
     crate::theme::tooltip_style(_theme)
 }
 
-// Re-export types used in Message
-pub(crate) use crate::history::store::CacheWarningLevel as CacheWarning;
+
 
 /// History panel enum (which main panel to show).
 #[derive(Clone, Debug, PartialEq)]

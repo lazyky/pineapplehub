@@ -1,3 +1,5 @@
+<img align="right" src="assets/favicon.png" alt="logo" width="128">
+
 # PineappleHub
 
 <p align="center">
@@ -15,7 +17,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL--1.1-EE5A24" alt="License: BSL 1.1"></a>
 </p>
 
-> _Why 99 years? — A nod to a certain lease agreement in Far East history._
 
 A browser-based pineapple fruit quality measurement tool built with Rust + WebAssembly.
 
@@ -40,3 +41,13 @@ Upload a photo of a bisected pineapple with a 1 Yuan coin for scale, and Pineapp
 
 - [Algorithm Documentation](docs/algorithms/algorithm.md)
 - [Debug Image Interpretation](docs/user_guide/debug_interpretation.md)
+
+## License
+
+This project is licensed under the [Business Source License 1.1](LICENSE).
+
+- **Commercial use is strictly prohibited.** The Additional Use Grant is set to *None*, meaning the Licensed Work may not be used in production under any circumstances without a separate commercial agreement from the licensor.
+- **Non-production use is permitted.** You are free to copy, modify, and redistribute the code for personal study, academic research, or internal evaluation.
+- **Change Date: 2125-03-18.** On this date the license automatically converts to the [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html) (or later), making the software fully open source.
+
+> _Why 99 years? — Because a certain 99-year lease was once written on the assumption that no one would ever come to collect. Same idea here._

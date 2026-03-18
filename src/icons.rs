@@ -10,8 +10,7 @@
 //! 2. Add a `pub(crate) const ICON_…` constant below.
 //! 3. Regenerate the font subset — see `assets/README.md` for the full command.
 
-use iced::widget::text;
-use iced::{Element, Font};
+use iced::Font;
 
 /// The Material Symbols icon font, loaded from the embedded subset.
 pub(crate) const ICON_FONT: Font = Font::with_name("Material Symbols Outlined");
@@ -33,10 +32,9 @@ pub(crate) const ICON_CHEVRON_RIGHT: &str = "\u{E409}";    // chevron_right
 pub(crate) const ICON_ARROW_UPWARD: &str = "\u{E5D8}";     // arrow_upward
 pub(crate) const ICON_ARROW_DOWNWARD: &str = "\u{E5DB}";   // arrow_downward
 pub(crate) const ICON_UNFOLD_MORE: &str = "\u{E5D7}";      // unfold_more (sortable hint)
-pub(crate) const ICON_MORE_VERT: &str = "\u{E5D4}";        // more_vert
+
 pub(crate) const ICON_SEARCH: &str = "\u{E8B6}";           // search
-pub(crate) const ICON_UNDO: &str = "\u{E166}";             // undo
-pub(crate) const ICON_SELECT_ALL: &str = "\u{E162}";       // select_all
+
 
 // ── CRUD & File operations ──
 pub(crate) const ICON_EDIT: &str = "\u{E150}";             // edit
@@ -47,7 +45,7 @@ pub(crate) const ICON_FOLDER: &str = "\u{E2C7}";           // folder
 
 // ── Status & Feedback ──
 pub(crate) const ICON_CHECK_CIRCLE: &str = "\u{E86C}";     // check_circle
-pub(crate) const ICON_CANCEL: &str = "\u{E5C9}";           // cancel
+
 pub(crate) const ICON_WARNING: &str = "\u{E002}";          // warning
 pub(crate) const ICON_ERROR: &str = "\u{E000}";            // error
 pub(crate) const ICON_INFO: &str = "\u{E88E}";             // info
@@ -71,13 +69,5 @@ pub(crate) const ICON_SYNC: &str = "\u{E627}";             // sync (processing)
 pub(crate) const ICON_BAR_CHART: &str = "\u{E26B}";        // bar_chart
 pub(crate) const ICON_MONITORING: &str = "\u{F190}";        // monitoring (dashboard card)
 pub(crate) const ICON_QUERY_STATS: &str = "\u{E4FC}";      // query_stats (outlier rate)
-pub(crate) const ICON_PERCENT: &str = "\u{EB58}";          // percent
-pub(crate) const ICON_CODE: &str = "\u{E86F}";             // code (GitHub link)
 
-/// Helper: create an icon text element with the given codepoint and size.
-pub(crate) fn icon<'a, Message: 'a>(codepoint: &'a str, size: f32) -> Element<'a, Message> {
-    text(codepoint)
-        .font(ICON_FONT)
-        .size(size)
-        .into()
-}
+

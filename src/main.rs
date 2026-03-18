@@ -14,7 +14,7 @@ mod utils;
 // Re-export init_thread_pool so wasm-bindgen exposes `initThreadPool()` in JS.
 pub use wasm_bindgen_rayon::init_thread_pool;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{
     error::Error,
@@ -52,6 +52,7 @@ const NOTO_SANS_SC_BYTES: &[u8] = include_bytes!("../assets/NotoSansSC-Regular.t
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum Message {
     // ── File input ──
     PickFiles,
@@ -491,7 +492,6 @@ impl App {
                             id,
                             filename: entry.name.clone(),
                             status: JobStatus::Queued,
-                            intermediates: Vec::new(),
                             metrics: None,
                         })
                         .collect();
@@ -565,7 +565,7 @@ impl App {
 
             // ── Batch processing ──
             Message::BatchStart => {
-                if let State::Finished(entries) = &self.upload.state {
+                if let State::Finished(_entries) = &self.upload.state {
                     let num_jobs = self.jobs.len();
 
                     // For single image in debug mode, start pipeline step-by-step
@@ -600,7 +600,7 @@ impl App {
                 // Now the overlay is visible. Start the streaming pipeline.
                 if let State::Finished(entries) = &self.upload.state {
                     let entries_clone: Vec<FileEntry> = entries.clone();
-                    let num_jobs = self.jobs.len();
+                    let _num_jobs = self.jobs.len();
                     return Task::run(iced::stream::channel(1, move |mut output: futures::channel::mpsc::Sender<Message>| async move {
                         use futures::SinkExt;
                         let total = entries_clone.len();

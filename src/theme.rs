@@ -19,12 +19,11 @@ pub const BG_ELEVATED: Color = color!(0x272727);
 
 // Text hierarchy  –  white / light grey
 pub const TEXT_PRIMARY: Color = color!(0xffffff);
-pub const TEXT_SECONDARY: Color = color!(0x999999);
-pub const TEXT_MUTED: Color = color!(0x666666);
+
 
 // Accent  –  PornHub orange
 pub const ACCENT: Color = color!(0xff9900);
-pub const ACCENT_HOVER: Color = color!(0xffad33);
+
 pub const ACCENT_DIM: Color = Color {
     r: 0xff as f32 / 255.0,
     g: 0x99 as f32 / 255.0,
@@ -332,17 +331,7 @@ pub fn dialog_scrim_style(_theme: &Theme) -> container::Style {
     }
 }
 
-/// Help overlay scrim (darker than dialog scrim for better readability).
-pub fn help_overlay_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(Color {
-            a: 0.85,
-            ..BG_DEEP
-        })),
-        text_color: Some(TEXT_PRIMARY),
-        ..Default::default()
-    }
-}
+
 
 /// Selected file item in analysis page job list.
 pub fn selected_job_style(_theme: &Theme) -> container::Style {
@@ -391,18 +380,7 @@ pub fn cache_warning_style(_theme: &Theme) -> container::Style {
     }
 }
 
-/// Delete confirmation banner.
-pub fn delete_confirm_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(BG_SURFACE)),
-        border: Border {
-            color: Color { a: 0.40, ..DANGER },
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        ..Default::default()
-    }
-}
+
 
 // ────────────────────────  Button styles  ────────────────────────
 

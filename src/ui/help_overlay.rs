@@ -40,8 +40,8 @@ const LOGO_FAVICON_SZ: f32 = 26.0;
 const TB_H: f32 = TB_PAD_Y + LOGO_H + TB_PAD_Y;
 const TB_CENTER_Y: f32 = TB_H / 2.0;
 
-const SEP_H: f32 = 2.0;
-const CONTENT_TOP: f32 = TB_H + SEP_H;
+
+
 
 // ────────────────────────  Canvas (lines & dots only)  ────────────
 

@@ -2,7 +2,7 @@
 //!
 //! Each `Job` represents a single image going through the measurement pipeline.
 
-use crate::pipeline::{FruitletMetrics, Intermediate};
+use crate::pipeline::FruitletMetrics;
 
 /// Current status of a processing job.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,9 +26,6 @@ pub(crate) struct Job {
     pub filename: String,
     /// Current processing status.
     pub status: JobStatus,
-    /// Pipeline intermediate steps (only populated in debug mode when user
-    /// has the Pipeline toggle ON and selects this job).
-    pub intermediates: Vec<Intermediate>,
     /// Final computed metrics (populated when status == Done).
     pub metrics: Option<FruitletMetrics>,
 }

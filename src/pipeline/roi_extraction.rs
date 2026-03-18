@@ -108,7 +108,6 @@ pub(crate) fn extract_best_roi(
 
     // Compute centroid and area for each qualifying Otsu candidate
     struct OtsuCandidate {
-        area: f32,
         centroid_x: i32,
         centroid_y: i32,
     }
@@ -122,7 +121,6 @@ pub(crate) fn extract_best_roi(
                 (sx + pt.x as i64, sy + pt.y as i64)
             });
             candidates.push(OtsuCandidate {
-                area,
                 centroid_x: if n > 0 { (sx / n) as i32 } else { 0 },
                 centroid_y: if n > 0 { (sy / n) as i32 } else { 0 },
             });

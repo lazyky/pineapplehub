@@ -6,8 +6,6 @@ use thiserror::Error;
 pub(crate) enum Error {
     #[error("Cannot determine the image format")]
     Decode(Arc<image::ImageError>),
-    #[error("File read failed: JS runtime error: {0}")]
-    Read(String),
     #[error("General error: {0}")]
     General(String),
 }

@@ -58,8 +58,8 @@ pub(crate) fn trigger_download(content: &str, filename: &str) {
     let array = js_sys::Array::new();
     array.push(&wasm_bindgen::JsValue::from_str(content));
 
-    let mut blob_opts = web_sys::BlobPropertyBag::new();
-    blob_opts.type_("text/csv;charset=utf-8");
+    let blob_opts = web_sys::BlobPropertyBag::new();
+    blob_opts.set_type("text/csv;charset=utf-8");
 
     let blob = match web_sys::Blob::new_with_str_sequence_and_options(&array, &blob_opts) {
         Ok(b) => b,

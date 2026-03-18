@@ -218,44 +218,8 @@ fn fill_holes_fast(
     result
 }
 
-struct Region {
-    area: u32,
-    points: Vec<Point<i32>>,
-    centroid_x: f32,
-    centroid_y: f32,
-    bbox_min_y: i32,
-    bbox_max_y: i32,
-}
 
-fn collect_regions(labels: &ImageBuffer<Luma<u32>, Vec<u32>>) -> HashMap<u32, Region> {
-    let mut regions: HashMap<u32, (u32, Vec<Point<i32>>, f64, f64, i32, i32)> = HashMap::new();
-    for (x, y, px) in labels.enumerate_pixels() {
-        let label = px.0[0];
-        if label == 0 {
-            continue;
-        }
-        let entry = regions.entry(label).or_insert((0, Vec::new(), 0.0, 0.0, y as i32, y as i32));
-        entry.0 += 1;
-        entry.1.push(Point::new(x as i32, y as i32));
-        entry.2 += x as f64;
-        entry.3 += y as f64;
-        entry.4 = entry.4.min(y as i32);
-        entry.5 = entry.5.max(y as i32);
-    }
-    regions
-        .into_iter()
-        .map(|(label, (area, points, sx, sy, min_y, max_y))| {
-            (label, Region {
-                area,
-                points,
-                centroid_x: sx as f32 / area as f32,
-                centroid_y: sy as f32 / area as f32,
-                bbox_min_y: min_y,
-                bbox_max_y: max_y,
-            })
-        })
-        .collect()
-}
+
 
 fn compute_fruitlet_rect(box_points: &[Point<i32>; 4]) -> (f32, f32, f32) {
     let dx1 = (box_points[0].x - box_points[1].x) as f32;

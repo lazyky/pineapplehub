@@ -1,3 +1,5 @@
+<img align="right" src="assets/favicon.png" alt="logo" width="128">
+
 # PineappleHub
 
 <p align="center">
@@ -15,7 +17,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL--1.1-EE5A24" alt="License: BSL 1.1"></a>
 </p>
 
-> _Why 99 years? — A nod to a certain lease agreement in Far East history._
 
 基于 Rust + WebAssembly 的浏览器端菠萝果实品质测量工具。
 
@@ -40,3 +41,13 @@
 
 - [算法文档](docs/algorithms/algorithm_zh.md)
 - [调试图解读](docs/user_guide/debug_interpretation_zh.md)
+
+## 许可证
+
+本项目采用 [Business Source License 1.1](LICENSE) 许可。
+
+- **严格禁止商业用途。** Additional Use Grant 设定为 *None*——在未与许可方另行签订商业协议的情况下，禁止将本软件用于任何生产环境。
+- **允许非生产用途。** 你可以自由地复制、修改和再分发代码，用于个人学习、学术研究或内部评估。
+- **变更日期：2125-03-18。** 届时许可将自动转换为 [GNU Affero 通用公共许可证 v3.0](https://www.gnu.org/licenses/agpl-3.0.html)（或更高版本），本应用将成为完全开源软件。
+
+> _为什么是 99 年？—— 当年签 99 年，是笃定届时无人会来追究。此处亦然。_

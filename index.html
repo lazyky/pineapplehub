@@ -7,11 +7,140 @@
   <title>PineappleHub</title>
   <base data-trunk-public-url />
   <link data-trunk rel="icon" type="image/png" href="assets/favicon.png" />
+  <link data-trunk rel="copy-file" href="assets/favicon.png" />
   <script src="coi-serviceworker.js"></script>
+  <style>
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #1a1a2e;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: opacity 0.6s ease;
+    }
+    #loading-screen.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* ── Logo ── */
+    #loading-logo {
+      width: 180px;
+      height: 180px;
+      image-rendering: pixelated;
+      animation: pulse 2.5s ease-in-out infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 24px rgba(247,151,30,0.35)); }
+      50% { transform: scale(0.96); filter: drop-shadow(0 0 36px rgba(247,151,30,0.55)); }
+    }
+
+    /* ── Brand ── */
+    #loading-brand {
+      display: flex;
+      align-items: center;
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 48px;
+    }
+    #loading-brand .white { color: #fff; }
+    #loading-brand .hub {
+      background: linear-gradient(135deg, #f7971e, #ffd200);
+      color: #000;
+      padding: 2px 12px;
+      border-radius: 8px;
+      margin-left: 5px;
+      font-weight: 800;
+    }
+
+    /* ── Progress bar container ── */
+    #loading-progress-wrap {
+      position: relative;
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Ambient glow behind bar */
+    #loading-glow {
+      position: absolute;
+      top: -12px;
+      left: 10%;
+      width: 80%;
+      height: 32px;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(247,151,30,0.25) 0%, transparent 70%);
+      filter: blur(6px);
+      pointer-events: none;
+    }
+
+    #loading-track {
+      width: 100%;
+      height: 8px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #loading-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #f7971e, #ffd200);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+      box-shadow:
+        0 0 6px  rgba(255,209,0,0.7),
+        0 0 16px rgba(247,151,30,0.5),
+        0 0 40px rgba(247,151,30,0.25);
+    }
+
+    /* Shimmer sweep */
+    #loading-bar::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -50%;
+      width: 50%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+      animation: shimmer 1.8s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0%   { left: -50%; }
+      100% { left: 150%; }
+    }
+
+    #loading-status {
+      color: #888;
+      font-size: 13px;
+      letter-spacing: 0.4px;
+    }
+  </style>
 </head>
 
 <body style="height: 100%; margin: 0">
-  <link data-trunk rel="rust" href="Cargo.toml" data-bindgen-target="web" data-initializer="js/initializer.js" />
+  <div id="loading-screen">
+    <img id="loading-logo" src="favicon.png" alt="PineappleHub" />
+    <div id="loading-brand">
+      <span class="white">Pineapple</span><span class="hub">Hub</span>
+    </div>
+    <div id="loading-progress-wrap">
+      <div id="loading-glow"></div>
+      <div id="loading-track">
+        <div id="loading-bar"></div>
+      </div>
+      <div id="loading-status">Initializing…</div>
+    </div>
+  </div>
+
+  <link data-trunk rel="rust" href="Cargo.toml" data-bindgen-target="web" data-initializer="js/initializer.js" data-wasm-opt="s" data-wasm-opt-params="--enable-bulk-memory --enable-threads --enable-mutable-globals --enable-nontrapping-float-to-int --enable-sign-ext" />
   <link data-trunk rel="copy-file" href="assets/_headers" />
   <link data-trunk rel="copy-file" href="js/coi-serviceworker.js" />
 </body>

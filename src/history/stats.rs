@@ -55,18 +55,7 @@ impl MetricColumn {
         }
     }
 
-    /// Short label used in compact table headers (no unit).
-    pub fn short_label(self) -> &'static str {
-        match self {
-            Self::Height => "H",
-            Self::Width => "D",
-            Self::Volume => "V",
-            Self::Aeq => "a",
-            Self::Beq => "b",
-            Self::SurfaceArea => "S",
-            Self::NTotal => "Nf",
-        }
-    }
+
 
     /// Tooltip description explaining what this metric is.
     pub fn description(self) -> &'static str {
@@ -131,44 +120,8 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
     sorted[lo] * (1.0 - frac) + sorted[hi.min(n - 1)] * frac
 }
 
-/// Compute stats for all metric columns from a set of records.
-pub(crate) fn compute_all_stats(records: &[AnalysisRecord]) -> HashMap<MetricColumn, ColumnStats> {
-    let mut result = HashMap::new();
-    for col in MetricColumn::ALL {
-        let values: Vec<f64> = records.iter().filter_map(|r| col.extract(r)).collect();
-        if let Some(stats) = compute_stats(&values) {
-            result.insert(col, stats);
-        }
-    }
-    result
-}
 
-/// Detect outliers using IQR (Tukey's fences) method.
-///
-/// A value is an outlier if it falls outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR].
-/// Returns a map from `record.id` → set of outlier columns.
-pub(crate) fn detect_outliers(
-    records: &[AnalysisRecord],
-    stats: &HashMap<MetricColumn, ColumnStats>,
-) -> HashMap<String, HashSet<MetricColumn>> {
-    let mut outliers: HashMap<String, HashSet<MetricColumn>> = HashMap::new();
-    for record in records {
-        for col in MetricColumn::ALL {
-            if let (Some(val), Some(st)) = (col.extract(record), stats.get(&col)) {
-                let iqr = st.q3 - st.q1;
-                let lower = st.q1 - 1.5 * iqr;
-                let upper = st.q3 + 1.5 * iqr;
-                if val < lower || val > upper {
-                    outliers
-                        .entry(record.id.clone())
-                        .or_default()
-                        .insert(col);
-                }
-            }
-        }
-    }
-    outliers
-}
+
 
 /// Compute stats from a slice of record references (for per-session grouping).
 pub(crate) fn compute_all_stats_from_refs(records: &[&AnalysisRecord]) -> HashMap<MetricColumn, ColumnStats> {

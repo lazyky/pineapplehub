@@ -10,7 +10,7 @@ use imageproc::{
     region_labelling::{Connectivity, connected_components},
 };
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use iced::time::Instant;
 
@@ -64,50 +64,7 @@ fn compute_rect_metrics(box_points: &[Point<i32>; 4]) -> (f32, f32, f32) {
     (major, minor, angle)
 }
 
-/// A connected component region with precomputed properties.
-struct Region {
-    points: Vec<Point<i32>>,
-    area: u32,
-    centroid_x: f32,
-    centroid_y: f32,
-    bbox_min_y: i32,
-    bbox_max_y: i32,
-}
 
-/// Collects connected component regions from a label image.
-fn collect_regions(labels: &ImageBuffer<Luma<u32>, Vec<u32>>) -> HashMap<u32, Region> {
-    let mut regions: HashMap<u32, Region> = HashMap::new();
-
-    for (x, y, pixel) in labels.enumerate_pixels() {
-        let label = pixel.0[0];
-        if label == 0 {
-            continue; // skip background
-        }
-        let entry = regions.entry(label).or_insert_with(|| Region {
-            points: Vec::new(),
-            area: 0,
-            centroid_x: 0.0,
-            centroid_y: 0.0,
-            bbox_min_y: i32::MAX,
-            bbox_max_y: i32::MIN,
-        });
-        entry.points.push(Point::new(x as i32, y as i32));
-        entry.area += 1;
-        entry.centroid_x += x as f32;
-        entry.centroid_y += y as f32;
-        entry.bbox_min_y = entry.bbox_min_y.min(y as i32);
-        entry.bbox_max_y = entry.bbox_max_y.max(y as i32);
-    }
-
-    // Finalize centroids
-    for region in regions.values_mut() {
-        let n = region.area as f32;
-        region.centroid_x /= n;
-        region.centroid_y /= n;
-    }
-
-    regions
-}
 
 /// Map a label to a pseudo-color for visualization.
 /// Uses golden-ratio hue spacing in HSV (S=0.85, V=0.9) so every label
@@ -232,141 +189,7 @@ fn fill_holes(binary: &image::GrayImage, max_hole_area: u32) -> image::GrayImage
     filled
 }
 
-/// Count white and total pixels inside a circle of radius `r` centred at `(cx, cy)`.
-fn circular_fill(img: &image::GrayImage, cx: i32, cy: i32, r: i32) -> (u32, u32) {
-    let (w, h) = img.dimensions();
-    let r2 = r * r;
-    let mut white = 0u32;
-    let mut total = 0u32;
-    for dy in -r..=r {
-        for dx in -r..=r {
-            if dx * dx + dy * dy > r2 { continue; }
-            let x = cx + dx;
-            let y = cy + dy;
-            if x >= 0 && x < w as i32 && y >= 0 && y < h as i32 {
-                total += 1;
-                if img.get_pixel(x as u32, y as u32).0[0] > 0 {
-                    white += 1;
-                }
-            }
-        }
-    }
-    (white, total)
-}
 
-/// A scored candidate from the multi-attempt search.
-struct ScoredCandidate {
-    open_r: u8,
-    box_points: [Point<i32>; 4],
-    major: f32,
-    minor: f32,
-    angle: f32,
-    area: f32,
-    score: f32,
-}
-
-/// Collect ALL valid equatorial candidates from a given binary+open_radius,
-/// computing a quality score for each.  Higher score = more likely a single eye.
-fn collect_candidates(
-    binary: &image::GrayImage,
-    equator_y: f32,
-    equator_band: f32,
-    center_x: f32,
-    roi_w: f32,
-    area_min: u32,
-    area_max: u32,
-    coin_area_px: f32,
-    open_radius: u8,
-) -> Vec<ScoredCandidate> {
-    let processed = if open_radius > 0 {
-        open(binary, Norm::LInf, open_radius)
-    } else {
-        binary.clone()
-    };
-
-    let labels = connected_components(&processed, Connectivity::Four, Luma([0u8]));
-    let regions = collect_regions(&labels);
-
-    let mut out = Vec::new();
-    let coin_diam_px_local = 2.0 * (coin_area_px / std::f32::consts::PI).sqrt();
-    if open_radius == 0 {
-        log::info!(
-            "[FruitletCounting] filter params: coin_diam={:.0}px, area=[{},{}], major=[{:.0},{:.0}], {} total CCs",
-            coin_diam_px_local, area_min, area_max,
-            coin_diam_px_local * 0.3, coin_diam_px_local * 2.0,
-            regions.len(),
-        );
-    }
-
-    for (_label, region) in &regions {
-        if region.area < area_min || region.area > area_max {
-            continue;
-        }
-        // Must overlap the equator band [equator_y - band, equator_y + band]
-        let band_top = (equator_y - equator_band) as i32;
-        let band_bottom = (equator_y + equator_band) as i32;
-        if region.bbox_max_y < band_top || region.bbox_min_y > band_bottom {
-            continue;
-        }
-
-        let rect = min_area_rect(&region.points);
-        let (major, minor, angle) = compute_rect_metrics(&rect);
-        if major <= 0.0 {
-            continue;
-        }
-
-        let aspect = minor / major;
-        // Hard cutoff: single eye physical constraints
-        if aspect < 0.15 || aspect > 1.0 {
-            continue;
-        }
-        // Hard cutoff: major axis must be ≤ 2× coin diameter
-        let coin_diam_px = 2.0 * (coin_area_px / std::f32::consts::PI).sqrt();
-        if major > coin_diam_px * 2.0 || major < coin_diam_px * 0.3 {
-            continue;
-        }
-
-        // --- Quality score ---
-        // 1) Area: prefer ≈ 1× coin area.  ln(1.0) = 0 → best.
-        //    Weight ×2 to strongly penalize merged blobs.
-        let area_ratio = region.area as f32 / coin_area_px;
-        let area_score = -(area_ratio.ln().abs()) * 2.0;     // 0 at 1×, -1.4 at 2×, -3.2 at 0.2×
-
-        // 2) Aspect: prefer ≈ 0.6 (typical pineapple eye)
-        let aspect_score = -((aspect - 0.6).abs()) * 3.0;   // 0 at 0.6, -0.6 at 0.4 or 0.8
-
-        // 3) Position: prefer centroid close to (center_x, equator_y)
-        let dx = (region.centroid_x - center_x) / (roi_w / 2.0);
-        let dy = (region.centroid_y - equator_y) / (roi_w / 2.0);
-        let pos_score = -(dx * dx + dy * dy).sqrt() * 0.5;  // 0 at centre
-
-        // 4) Fill ratio: a real eye is roughly elliptical → fills ~π/4 ≈ 0.785
-        //    of its bounding rect.  Irregular merged fragments fill much less.
-        let rect_area = major * minor;
-        let fill_ratio = if rect_area > 0.0 { region.area as f32 / rect_area } else { 0.0 };
-        let fill_score = -((fill_ratio - 0.75).abs()) * 4.0; // 0 at 0.75, -1.0 at 0.50
-
-        // 5) Dimension match: major axis should be ≈ coin diameter (25 mm).
-        //    This is the KEY prior: pineapple eyes are coin-sized.
-        let coin_diam_px = 2.0 * (coin_area_px / std::f32::consts::PI).sqrt();
-        let major_ratio = major / coin_diam_px;
-        let dim_score = -(major_ratio.ln().abs()) * 3.0;     // 0 when major = coin_diam
-
-        let score = area_score + aspect_score + pos_score + fill_score + dim_score;
-
-        out.push(ScoredCandidate {
-            open_r: open_radius,
-            box_points: rect,
-            major,
-            minor,
-            angle,
-            area: region.area as f32,
-            score,
-        });
-    }
-
-    out
-}
 
 /// Process the `FruitletCounting` step: fruitlet eye segmentation, counting,
 /// and row count estimation.

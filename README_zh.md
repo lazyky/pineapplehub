@@ -4,6 +4,19 @@
   中文 | <a href="README.md">English</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/TT-Industry/pineapplehub/actions/workflows/deploy.yml"><img src="https://github.com/TT-Industry/pineapplehub/actions/workflows/deploy.yml/badge.svg" alt="Deploy"></a>
+  <a href="https://tt-industry.github.io/pineapplehub"><img src="https://img.shields.io/badge/demo-live-brightgreen?logo=github" alt="Live Demo"></a>
+  <img src="https://img.shields.io/badge/rust-nightly--2025--09--23-orange?logo=rust" alt="Rust Nightly">
+  <img src="https://img.shields.io/badge/target-wasm32-blueviolet?logo=webassembly" alt="WebAssembly">
+  <img src="https://img.shields.io/badge/unsafe-denied-success" alt="No Unsafe">
+  <img src="https://img.shields.io/badge/clippy-pedantic-informational" alt="Clippy Pedantic">
+  <img src="https://img.shields.io/badge/100%25-Rust-dea584?logo=rust" alt="Pure Rust">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL--1.1-EE5A24" alt="License: BSL 1.1"></a>
+</p>
+
+> _Why 99 years? — A nod to a certain lease agreement in Far East history._
+
 基于 Rust + WebAssembly 的浏览器端菠萝果实品质测量工具。
 
 上传一张带有 1 元硬币（用作比例尺）的菠萝剖面照片，PineappleHub 即可自动测量果实几何参数与小果眼数量。

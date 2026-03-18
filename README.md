@@ -4,6 +4,19 @@
   <a href="README_zh.md">中文</a> | English
 </p>
 
+<p align="center">
+  <a href="https://github.com/TT-Industry/pineapplehub/actions/workflows/deploy.yml"><img src="https://github.com/TT-Industry/pineapplehub/actions/workflows/deploy.yml/badge.svg" alt="Deploy"></a>
+  <a href="https://tt-industry.github.io/pineapplehub"><img src="https://img.shields.io/badge/demo-live-brightgreen?logo=github" alt="Live Demo"></a>
+  <img src="https://img.shields.io/badge/rust-nightly--2025--09--23-orange?logo=rust" alt="Rust Nightly">
+  <img src="https://img.shields.io/badge/target-wasm32-blueviolet?logo=webassembly" alt="WebAssembly">
+  <img src="https://img.shields.io/badge/unsafe-denied-success" alt="No Unsafe">
+  <img src="https://img.shields.io/badge/clippy-pedantic-informational" alt="Clippy Pedantic">
+  <img src="https://img.shields.io/badge/100%25-Rust-dea584?logo=rust" alt="Pure Rust">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL--1.1-EE5A24" alt="License: BSL 1.1"></a>
+</p>
+
+> _Why 99 years? — A nod to a certain lease agreement in Far East history._
+
 A browser-based pineapple fruit quality measurement tool built with Rust + WebAssembly.
 
 Upload a photo of a bisected pineapple with a 1 Yuan coin for scale, and PineappleHub automatically measures fruit geometry and fruitlet eye count.

@@ -68,7 +68,7 @@ impl canvas::Program<Message> for LinesCanvas {
         frame.fill_rectangle(
             Point::ORIGIN,
             Size::new(w, h),
-            Color { a: 0.82, ..theme::BG_DEEP },
+            Color { a: 0.82, ..theme::bg_deep() },
         );
 
         let line_color = Color::from_rgba(1.0, 0.85, 0.3, 0.50);
@@ -95,7 +95,7 @@ impl canvas::Program<Message> for LinesCanvas {
             }
 
             // Target dot
-            frame.fill(&Path::circle(Point::new(px, target_py), dot_r), theme::ACCENT);
+            frame.fill(&Path::circle(Point::new(px, target_py), dot_r), theme::accent());
         }
 
         // Close hint — only drawn when there are annotations
@@ -139,7 +139,7 @@ fn history_annotations(_w: f32, _h: f32) -> Vec<Annotation> {
 fn lbl<'a>(s: &str) -> Element<'a, Message> {
     text(s.to_string())
         .size(15)
-        .color(theme::ACCENT)
+        .color(theme::accent())
         .into()
 }
 
@@ -232,7 +232,7 @@ fn help_line<'a>(s: &str) -> Element<'a, Message> {
 fn help_heading<'a>(s: &str) -> Element<'a, Message> {
     text(s.to_string())
         .size(16)
-        .color(theme::ACCENT)
+        .color(theme::accent())
         .into()
 }
 
@@ -247,7 +247,7 @@ pub(crate) fn view_history_help<'a>() -> Element<'a, Message> {
         column![
             text("History — Quick Guide")
                 .size(20)
-                .color(theme::ACCENT),
+                .color(theme::accent()),
             space::vertical().height(Length::Fixed(16.0)),
 
             help_heading("Star"),

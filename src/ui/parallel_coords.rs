@@ -298,7 +298,7 @@ impl Chart<Message> for ParallelCoordsChart {
         }
 
         // Dark background
-        root.fill(&crate::theme::chart::BG).ok();
+        root.fill(&crate::theme::chart::bg()).ok();
 
         let (w, h) = root.dim_in_pixel();
         let w = w as f64;
@@ -326,10 +326,10 @@ impl Chart<Message> for ParallelCoordsChart {
         };
 
         // Use the embedded font for all text
-        let axis_color = crate::theme::chart::AXIS;
-        let label_color = crate::theme::chart::LABEL;
+        let axis_color = crate::theme::chart::axis();
+        let label_color = crate::theme::chart::label();
         let label_style = (CHART_FONT, 11).into_font().color(&label_color);
-        let tick_style = (CHART_FONT, 9).into_font().color(&crate::theme::chart::TICK);
+        let tick_style = (CHART_FONT, 9).into_font().color(&crate::theme::chart::tick());
 
         // Draw axes + labels + ticks
         for (i, col) in axes.iter().enumerate() {
@@ -373,9 +373,9 @@ impl Chart<Message> for ParallelCoordsChart {
         }
 
         // Draw polylines: normal first (background), then suspects (foreground)
-        let normal_color = crate::theme::chart::NORMAL_LINE;
-        let suspect_color = crate::theme::chart::SUSPECT_LINE;
-        let highlight_color = crate::theme::chart::HIGHLIGHT_LINE;
+        let normal_color = crate::theme::chart::normal_line();
+        let suspect_color = crate::theme::chart::suspect_line();
+        let highlight_color = crate::theme::chart::highlight_line();
 
         for (idx, sample) in self.samples.iter().enumerate() {
             if sample.suspect { continue; }
@@ -420,7 +420,7 @@ impl Chart<Message> for ParallelCoordsChart {
 
         root.draw(&Rectangle::new(
             [(lx, legend_y), (lx + 12, legend_y + 8)],
-            crate::theme::chart::LEGEND_NORMAL.filled(),
+            crate::theme::chart::legend_normal().filled(),
         )).ok();
         root.draw(&plotters::element::Text::new(
             format!("Normal ({})", self.normal_count),
@@ -431,7 +431,7 @@ impl Chart<Message> for ParallelCoordsChart {
         let sx = lx + 110;
         root.draw(&Rectangle::new(
             [(sx, legend_y), (sx + 12, legend_y + 8)],
-            crate::theme::chart::LEGEND_SUSPECT.filled(),
+            crate::theme::chart::legend_suspect().filled(),
         )).ok();
         root.draw(&plotters::element::Text::new(
             format!("Suspect ({})", self.suspect_count),
@@ -452,12 +452,12 @@ impl Chart<Message> for ParallelCoordsChart {
                 // Semi-transparent background
                 root.draw(&Rectangle::new(
                     [(tx, ty), (tx + tooltip_w, ty + tooltip_h)],
-                    crate::theme::chart::TOOLTIP_BG.filled(),
+                    crate::theme::chart::tooltip_bg().filled(),
                 )).ok();
                 // Border
                 root.draw(&Rectangle::new(
                     [(tx, ty), (tx + tooltip_w, ty + tooltip_h)],
-                    crate::theme::chart::TOOLTIP_BORDER.stroke_width(1),
+                    crate::theme::chart::tooltip_border().stroke_width(1),
                 )).ok();
 
                 // Filename (header)
@@ -465,7 +465,7 @@ impl Chart<Message> for ParallelCoordsChart {
                 root.draw(&plotters::element::Text::new(
                     format!("{}{}", sample.filename, status),
                     (tx + 4, ty + 2),
-                    (CHART_FONT, 10).into_font().color(&crate::theme::chart::TOOLTIP_HEADER),
+                    (CHART_FONT, 10).into_font().color(&crate::theme::chart::tooltip_header()),
                 )).ok();
 
                 // Metric values

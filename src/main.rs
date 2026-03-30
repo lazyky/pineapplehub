@@ -26,6 +26,7 @@ use crate::{
     job::{Job, JobStatus},
     js_interop::FileEntry,
     pipeline::{EncodedImage, FruitletMetrics, Intermediate, Step},
+    theme::ThemeVariant,
     ui::{
         history_view::{self, HistoryPanel, Page},
         preview::Preview,
@@ -149,6 +150,8 @@ enum Message {
     Noop,
     /// Quick filter toggle for Records panel
     ToggleRecordFilter(RecordFilter),
+    /// Cycle to the next theme variant.
+    SwitchTheme,
 }
 
 // ────────────────────────  History Pane  ────────────────────────
@@ -292,6 +295,9 @@ struct App {
 
     /// D2R-style help overlay visible.
     show_help: bool,
+
+    /// Currently active theme variant.
+    theme_variant: ThemeVariant,
 }
 
 impl App {
@@ -342,6 +348,7 @@ impl App {
                 },
             ),
             show_help: false,
+            theme_variant: ThemeVariant::default(),
         }
     }
 
@@ -765,6 +772,11 @@ impl App {
             Message::ToggleRecordFilter(f) => {
                 // Toggle off if the same filter is pressed again
                 self.record_filter = if self.record_filter == f { RecordFilter::All } else { f };
+                Task::none()
+            }
+            Message::SwitchTheme => {
+                self.theme_variant = self.theme_variant.next();
+                theme::set_active_palette(self.theme_variant);
                 Task::none()
             }
 
@@ -1561,14 +1573,14 @@ impl App {
         let favicon_handle = image::Handle::from_bytes(
             include_bytes!("../assets/favicon.png").as_slice(),
         );
-        // PornHub-style logo: "Pineapple" white + "Hub" black-on-orange badge
+        // Logo: "Pineapple" white + "Hub" black-on-accent badge
         let hub_badge = container(text("Hub").size(18).color(Color::BLACK))
             .padding([2, 6])
             .style(theme::hub_badge_style);
         let logo = button(
             row![
                 image(favicon_handle).width(26).height(26),
-                text("Pineapple").size(20).color(theme::TEXT_PRIMARY),
+                text("Pineapple").size(20).color(theme::text_primary()),
                 hub_badge,
             ]
             .spacing(4)
@@ -1599,6 +1611,14 @@ impl App {
                         .style(theme::text_button_style)
                         .padding(6),
                     "History",
+                    tooltip::Position::Bottom,
+                ).style(theme::tooltip_style),
+                tooltip(
+                    button(text(icons::ICON_PALETTE).font(icons::ICON_FONT).size(20))
+                        .on_press(Message::SwitchTheme)
+                        .style(theme::text_button_style)
+                        .padding(6),
+                    self.theme_variant.label(),
                     tooltip::Position::Bottom,
                 ).style(theme::tooltip_style),
                 tooltip(
@@ -2022,6 +2042,7 @@ impl App {
 // for Web Worker thread safety (no iced types / browser APIs).
 
 fn pineapple_app_theme(_app: &App) -> iced::Theme {
+    // Palette is already set via thread_local; pineapple_theme() reads from it.
     theme::pineapple_theme()
 }
 

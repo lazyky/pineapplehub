@@ -54,6 +54,7 @@ pub(crate) const ICON_HELP: &str = "\u{E887}";             // help
 // ── Session / History ──
 pub(crate) const ICON_STAR: &str = "\u{E838}";             // star
 pub(crate) const ICON_HISTORY: &str = "\u{E28E}";          // history
+pub(crate) const ICON_PALETTE: &str = "\u{E40A}";          // palette
 pub(crate) const ICON_CLEANING: &str = "\u{F0FF}";         // cleaning_services
 
 // ── Notes & Comments ──

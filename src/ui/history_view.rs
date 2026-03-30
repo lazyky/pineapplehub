@@ -657,7 +657,7 @@ pub(crate) fn view_records_panel<'a>(
                     let is_outlier = outlier_set.contains(&col);
                     let txt = text(value).size(13);
                     let txt = if is_outlier {
-                        txt.color(crate::theme::OUTLIER_TEXT)
+                        txt.color(crate::theme::outlier_text())
                     } else {
                         txt
                     };
@@ -944,11 +944,11 @@ pub(crate) fn view_statistics_panel<'a>(
     };
 
     let rate_color = if outlier_rate > 10.0 {
-        crate::theme::DANGER
+        crate::theme::danger()
     } else if outlier_rate > 5.0 {
-        crate::theme::WARNING
+        crate::theme::warning()
     } else {
-        crate::theme::SUCCESS
+        crate::theme::success()
     };
 
     col = col.push(

@@ -29,14 +29,14 @@ Static files embedded into the WASM binary at compile time via `include_bytes!`.
   "
 
   # 3. Generate subset (update --unicodes when adding icons)
-  #    Current glyphs (34): close, edit, select_all, undo, download, bar_chart,
+  #    Current glyphs (35): close, edit, select_all, undo, download, bar_chart,
   #    history, folder, chevron_left, chevron_right, query_stats, cancel,
   #    more_vert, unfold_more, arrow_upward, arrow_downward, sync, star,
   #    check_circle, delete, description, help, hourglass_empty, info,
   #    search, hourglass_top, percent, comment, cleaning_services,
-  #    mark_chat_read, monitoring, sticky_note_2, warning, error
+  #    mark_chat_read, monitoring, sticky_note_2, warning, error, palette
   pyftsubset /tmp/MaterialSymbolsOutlined.ttf \
-    --unicodes="U+E000,U+E002,U+E0B9,U+E14C,U+E150,U+E162,U+E166,U+E171,U+E26B,U+E28E,U+E2C7,U+E408,U+E409,U+E4FC,U+E5C9,U+E5D4,U+E5D7,U+E5D8,U+E5DB,U+E627,U+E838,U+E86C,U+E872,U+E873,U+E887,U+E88B,U+E88E,U+E8B6,U+EA5B,U+EB58,U+F0FF,U+F18B,U+F190,U+F1FC" \
+    --unicodes="U+E000,U+E002,U+E0B9,U+E14C,U+E150,U+E162,U+E166,U+E171,U+E26B,U+E28E,U+E2C7,U+E408,U+E409,U+E4FC,U+E5C9,U+E5D4,U+E5D7,U+E5D8,U+E5DB,U+E627,U+E838,U+E86C,U+E872,U+E873,U+E887,U+E88B,U+E88E,U+E8B6,U+EA5B,U+EB58,U+F0FF,U+F18B,U+F190,U+F1FC,U+E40A" \
     --output-file=assets/material-symbols.ttf \
     --layout-features="" --no-hinting --desubroutinize
   ```

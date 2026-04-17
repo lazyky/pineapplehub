@@ -979,6 +979,9 @@ impl App {
             // ── Camera page ──
             Message::CameraSessionModeChanged(mode) => {
                 js_interop::save_camera_mode(mode.as_key());
+                // IMPORTANT: set mode first so the UI always reflects the click,
+                // even if we also kick off an async session-list load below.
+                self.camera_mode = mode.clone();
                 if let CameraSessionMode::AppendTo(ref sid) = mode {
                     if !sid.is_empty() {
                         js_interop::save_camera_append_session(sid);
@@ -994,7 +997,6 @@ impl App {
                         );
                     }
                 }
-                self.camera_mode = mode;
                 Task::none()
             }
             Message::CameraSessionsLoaded(sessions) => {

@@ -21,6 +21,12 @@ struct ColumnData {
 pub fn unwrap_with_radius(img: &GrayImage, f: f32, r: f32) -> GrayImage {
     let w = img.width();
     let h = img.height();
+
+    // Need at least 2×2 pixels for bilinear interpolation
+    if w < 2 || h < 2 {
+        return img.clone();
+    }
+
     let wf = w as f32;
     let hf = h as f32;
 
@@ -59,6 +65,9 @@ pub fn unwrap_with_radius(img: &GrayImage, f: f32, r: f32) -> GrayImage {
         })
         .collect();
 
+    let w_clamp = w.saturating_sub(2);  // safe upper bound for x0
+    let h_clamp = h.saturating_sub(2);  // safe upper bound for y0
+
     for y in 0..h {
         let pc_y = y as f32 - half_h;
 
@@ -69,15 +78,13 @@ pub fn unwrap_with_radius(img: &GrayImage, f: f32, r: f32) -> GrayImage {
             let src_y = pc_y * col.zc_over_f + half_h;
 
             // Skip if source point is outside the image entirely.
-            // (Clamping these would smear edge pixels into vertical streaks.)
             if src_x < 0.0 || src_x >= wf || src_y < 0.0 || src_y >= hf {
                 continue;
             }
 
             // Bilinear interpolation: clamp the 2×2 neighborhood to valid indices
-            // so we don't lose the 1-pixel border that strict bounds checking would skip.
-            let x0 = (src_x.floor() as u32).min(w - 2);
-            let y0 = (src_y.floor() as u32).min(h - 2);
+            let x0 = (src_x.floor() as u32).min(w_clamp);
+            let y0 = (src_y.floor() as u32).min(h_clamp);
             let x1 = x0 + 1;
             let y1 = y0 + 1;
 

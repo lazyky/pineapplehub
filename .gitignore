@@ -2,3 +2,6 @@
 /dist
 .agent
 .*-mcp
+# TLS dev certs
+localhost.key
+localhost.crt

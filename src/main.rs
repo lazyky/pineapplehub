@@ -152,6 +152,25 @@ enum Message {
     ToggleRecordFilter(RecordFilter),
     /// Cycle to the next theme variant.
     SwitchTheme,
+
+    /// Window was resized — update cached dimensions.
+    WindowResized(f32, f32),
+
+    // ── Camera page ──
+    /// User changed the session mode in the Camera page.
+    CameraSessionModeChanged(CameraSessionMode),
+    /// Shutter button pressed — start capture.
+    CameraCapture,
+    /// A photo has been captured (or failed).
+    CameraCaptured(Result<js_interop::FileEntry, crate::error::Error>),
+    /// Remove a queued capture by index.
+    CameraRemoveCapture(usize),
+    /// "Analyze" button pressed — run the pipeline on queued captures.
+    CameraStartAnalysis,
+    /// Session list loaded lazily for "append to existing" mode.
+    CameraSessionsLoaded(Vec<SessionSummary>),
+    /// Camera permission was denied by the user.
+    CameraPermissionDenied,
 }
 
 // ────────────────────────  History Pane  ────────────────────────
@@ -160,6 +179,38 @@ enum Message {
 enum HistoryPane {
     Sidebar,
     MainPanel,
+}
+
+/// Session association mode for camera captures.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum CameraSessionMode {
+    /// Create a new session automatically after analysis.
+    #[default]
+    NewSession,
+    /// Append results to an existing session (selected by session_id).
+    AppendTo(String),
+    /// Standalone — do not persist results.
+    Standalone,
+}
+
+impl CameraSessionMode {
+    /// Serialize to the string stored in localStorage.
+    fn as_key(&self) -> &'static str {
+        match self {
+            Self::NewSession => "new",
+            Self::AppendTo(_) => "append",
+            Self::Standalone => "standalone",
+        }
+    }
+
+    /// Deserialize from the string stored in localStorage.
+    fn from_key(key: &str) -> Self {
+        match key {
+            "append" => Self::AppendTo(String::new()), // session_id filled in separately
+            "standalone" => Self::Standalone,
+            _ => Self::NewSession,
+        }
+    }
 }
 
 /// Data cached during soft-delete, restorable via Undo.
@@ -298,6 +349,29 @@ struct App {
 
     /// Currently active theme variant.
     theme_variant: ThemeVariant,
+
+    /// Current window dimensions in logical pixels (updated via subscription).
+    /// Used for portrait detection on mobile.
+    window_width: f32,
+    window_height: f32,
+
+    // ── Camera page state ──
+    /// Currently selected session association mode.
+    camera_mode: CameraSessionMode,
+    /// Photos queued for analysis (captured but not yet processed).
+    camera_queue: Vec<js_interop::FileEntry>,
+    /// Session list shown in the "append to existing" picker (lazily loaded).
+    camera_sessions: Vec<SessionSummary>,
+    /// Whether the camera sessions list is currently loading.
+    camera_sessions_loading: bool,
+    /// Camera capture is in progress.
+    camera_capturing: bool,
+    /// Last camera error message to display to the user.
+    camera_error: Option<String>,
+    /// The camera mode that was active when CameraStartAnalysis was triggered.
+    /// Cleared after each batch completes. None means this batch came from a
+    /// normal file upload (not the camera page).
+    camera_batch_mode: Option<CameraSessionMode>,
 }
 
 impl App {
@@ -349,6 +423,32 @@ impl App {
             ),
             show_help: false,
             theme_variant: ThemeVariant::default(),
+            window_width: web_sys::window()
+                .and_then(|w| w.inner_width().ok())
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1024.0) as f32,
+            window_height: web_sys::window()
+                .and_then(|w| w.inner_height().ok())
+                .and_then(|v| v.as_f64())
+                .unwrap_or(768.0) as f32,
+            camera_mode: {
+                let base = js_interop::load_camera_mode()
+                    .map(|k| CameraSessionMode::from_key(&k))
+                    .unwrap_or_default();
+                // Restore saved session_id if the mode was "append"
+                if let CameraSessionMode::AppendTo(_) = &base {
+                    let sid = js_interop::load_camera_append_session().unwrap_or_default();
+                    CameraSessionMode::AppendTo(sid)
+                } else {
+                    base
+                }
+            },
+            camera_queue: Vec::new(),
+            camera_sessions: Vec::new(),
+            camera_sessions_loading: false,
+            camera_capturing: false,
+            camera_error: None,
+            camera_batch_mode: None,
         }
     }
 
@@ -471,6 +571,17 @@ impl App {
             );
         }
 
+        // Window resize — update portrait detection
+        subs.push(
+            iced::event::listen_with(|event, _status, _window| {
+                if let iced::Event::Window(iced::window::Event::Resized(size)) = event {
+                    Some(Message::WindowResized(size.width, size.height))
+                } else {
+                    None
+                }
+            }),
+        );
+
         Subscription::batch(subs)
     }
 
@@ -572,6 +683,12 @@ impl App {
 
             // ── Batch processing ──
             Message::BatchStart => {
+                log::info!("[batch] BatchStart received; state={}", match &self.upload.state {
+                    State::Idle => "Idle",
+                    State::Uploading { .. } => "Uploading",
+                    State::Finished(_) => "Finished",
+                    State::Errored => "Errored",
+                });
                 if let State::Finished(_entries) = &self.upload.state {
                     let num_jobs = self.jobs.len();
 
@@ -587,12 +704,23 @@ impl App {
                         }
                     }
 
-                    // Generate session ID for batch mode (≥2 files)
-                    if num_jobs >= 2 {
-                        self.current_session_id = Some(store::generate_id());
-                    } else {
-                        self.current_session_id = None;
-                    }
+                    // Generate session ID:
+                    // - Normal upload: only for ≥2 files (single-image stays in debug mode)
+                    // - Camera NewSession: always (even 1 photo needs a session)
+                    // - Camera AppendTo: the session already exists — use that ID directly
+                    // - Camera Standalone: no persistence, leave None
+                    self.current_session_id = match &self.camera_batch_mode {
+                        Some(CameraSessionMode::NewSession) => Some(store::generate_id()),
+                        Some(CameraSessionMode::AppendTo(sid)) if !sid.is_empty() => {
+                            Some(sid.clone())
+                        }
+                        Some(CameraSessionMode::AppendTo(_)) => None, // no session selected
+                        Some(CameraSessionMode::Standalone) => None,
+                        None => {
+                            // Regular file-upload mode: only batch (≥2) gets a session
+                            if num_jobs >= 2 { Some(store::generate_id()) } else { None }
+                        }
+                    };
 
                     // Mark all jobs as Processing and show decoding overlay.
                     for job in &mut self.jobs {
@@ -604,6 +732,7 @@ impl App {
                 Task::none()
             }
             Message::StartDecoding => {
+                log::info!("[batch] StartDecoding; jobs={}", self.jobs.len());
                 // Now the overlay is visible. Start the streaming pipeline.
                 if let State::Finished(entries) = &self.upload.state {
                     let entries_clone: Vec<FileEntry> = entries.clone();
@@ -611,38 +740,66 @@ impl App {
                     return Task::run(iced::stream::channel(1, move |mut output: futures::channel::mpsc::Sender<Message>| async move {
                         use futures::SinkExt;
                         let total = entries_clone.len();
+                        web_sys::console::log_1(&format!("[stream] Phase 1 begin: {} entries", total).into());
 
                         // Phase 1: sequential decode on main thread
-                        // After sending progress, yield to browser's MACROTASK queue
-                        // via setTimeout(0). Microtasks alone don't trigger paint.
                         let mut prepared = Vec::with_capacity(total);
                         for (id, entry) in entries_clone.iter().enumerate() {
+                            web_sys::console::log_1(&format!("[stream] decoding entry {id}").into());
                             let _ = output.send(Message::DecodingProgress(id, total)).await;
-                            // Force browser paint before blocking on the next decode
                             gloo_timers::future::TimeoutFuture::new(0).await;
                             match pipeline::fast::prepare_image(entry) {
-                                Ok(prep) => prepared.push((id, prep)),
+                                Ok(prep) => {
+                                    web_sys::console::log_1(&format!("[stream] entry {id} decoded OK").into());
+                                    prepared.push((id, prep));
+                                }
                                 Err(e) => {
+                                    web_sys::console::log_1(&format!("[stream] entry {id} decode ERR: {e}").into());
                                     let _ = output.send(Message::JobDone(id, Err(e))).await;
                                 }
                             }
                         }
 
                         // Phase 1 done — dismiss overlay immediately
+                        web_sys::console::log_1(&format!("[stream] Phase 1 done: {} prepared", prepared.len()).into());
                         let _ = output.send(Message::DecodingDone).await;
 
                         // Phase 2: spawn rayon tasks, collect results via channel
                         let (tx, mut rx) = futures::channel::mpsc::unbounded();
                         let count = prepared.len();
+                        web_sys::console::log_1(&format!("[stream] Phase 2 begin: spawning {count} rayon tasks").into());
 
                         for (id, prep) in prepared {
                             let tx = tx.clone();
                             rayon::spawn(move || {
-                                let result = pipeline::fast::process_prepared(&prep);
+                                let result = std::panic::catch_unwind(
+                                    std::panic::AssertUnwindSafe(|| {
+                                        pipeline::fast::process_prepared(&prep)
+                                    })
+                                );
+                                let result = match result {
+                                    Ok(r) => r,
+                                    Err(panic_info) => {
+                                        let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                                            s.clone()
+                                        } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                                            s.to_string()
+                                        } else {
+                                            "Unknown panic in pipeline".to_string()
+                                        };
+                                        web_sys::console::error_1(
+                                            &format!("[stream] worker {id} PANIC caught: {msg}").into()
+                                        );
+                                        Err(crate::error::Error::General(
+                                            format!("Pipeline panic: {msg}")
+                                        ))
+                                    }
+                                };
                                 let _ = tx.unbounded_send(Message::JobDone(id, result));
                             });
                         }
-                        drop(tx); // close sender so rx ends when all workers finish
+                        drop(tx);
+                        web_sys::console::log_1(&"[stream] all rayon tasks spawned".into());
 
                         // Forward results to iced as each worker completes
                         use futures::StreamExt;
@@ -650,11 +807,14 @@ impl App {
                         while let Some(msg) = rx.next().await {
                             let _ = output.send(msg).await;
                             received += 1;
+                            web_sys::console::log_1(&format!("[stream] result {received}/{count} received").into());
                             if received >= count {
                                 break;
                             }
                         }
+                        web_sys::console::log_1(&"[stream] stream complete".into());
                     }), |msg| msg);
+
                 }
                 Task::none()
             }
@@ -685,6 +845,9 @@ impl App {
                     matches!(j.status, JobStatus::Done | JobStatus::Error(_))
                 });
                 if all_done {
+                    // Take camera mode snapshot (clear so next upload is a fresh slate)
+                    let batch_mode = self.camera_batch_mode.take();
+
                     if let Some(session_id) = self.current_session_id.take() {
                         let total_count = self.jobs.len() as u32;
                         let failed_count = self.jobs.iter()
@@ -692,15 +855,6 @@ impl App {
                             .count() as u32;
 
                         let timestamp = js_sys::Date::now();
-                        let meta = SessionMeta {
-                            session_id: session_id.clone(),
-                            timestamp,
-                            total_count,
-                            success_count: total_count - failed_count,
-                            failed_count,
-                            starred: false,
-                            name: None,
-                        };
 
                         let mut records: Vec<AnalysisRecord> = self.jobs.iter()
                             .filter_map(|job| {
@@ -729,13 +883,36 @@ impl App {
                             }
                         }
 
+                        // Route storage: AppendTo → append, NewSession/normal → save_session
+                        let is_append = matches!(
+                            &batch_mode, Some(CameraSessionMode::AppendTo(_))
+                        );
+
                         return Task::perform(
                             async move {
                                 match store::open_db().await {
-                                    Ok(db) => match store::save_session(&db, &meta, &records).await {
-                                        Ok(()) => log::info!("Batch saved successfully"),
-                                        Err(e) => log::error!("Failed to save batch: {e:?}"),
-                                    },
+                                    Ok(db) => {
+                                        if is_append {
+                                            match store::append_to_session(&db, &session_id, &records).await {
+                                                Ok(()) => log::info!("Camera batch appended to session {session_id}"),
+                                                Err(e) => log::error!("Failed to append camera batch: {e:?}"),
+                                            }
+                                        } else {
+                                            let meta = SessionMeta {
+                                                session_id: session_id.clone(),
+                                                timestamp,
+                                                total_count,
+                                                success_count: total_count - failed_count,
+                                                failed_count,
+                                                starred: false,
+                                                name: None,
+                                            };
+                                            match store::save_session(&db, &meta, &records).await {
+                                                Ok(()) => log::info!("Batch saved successfully"),
+                                                Err(e) => log::error!("Failed to save batch: {e:?}"),
+                                            }
+                                        }
+                                    }
                                     Err(e) => log::error!("Failed to open DB for batch save: {e:?}"),
                                 }
                             },
@@ -777,6 +954,122 @@ impl App {
             Message::SwitchTheme => {
                 self.theme_variant = self.theme_variant.next();
                 theme::set_active_palette(self.theme_variant);
+                Task::none()
+            }
+            Message::WindowResized(w, h) => {
+                // iced gives us logical pixels (CSS pixels on WASM with DPR=1 scale).
+                // Cross-check with window.innerWidth to guard against DPR scaling issues.
+                let (css_w, css_h) = {
+                    let win = web_sys::window();
+                    let cw = win.as_ref()
+                        .and_then(|w| w.inner_width().ok())
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(w as f64) as f32;
+                    let ch = win.as_ref()
+                        .and_then(|w| w.inner_height().ok())
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(h as f64) as f32;
+                    (cw, ch)
+                };
+                self.window_width = css_w;
+                self.window_height = css_h;
+                Task::none()
+            }
+
+            // ── Camera page ──
+            Message::CameraSessionModeChanged(mode) => {
+                js_interop::save_camera_mode(mode.as_key());
+                if let CameraSessionMode::AppendTo(ref sid) = mode {
+                    if !sid.is_empty() {
+                        js_interop::save_camera_append_session(sid);
+                    } else if !self.camera_sessions_loading {
+                        // Lazily load session list on first switch to "append"
+                        self.camera_sessions_loading = true;
+                        return Task::perform(
+                            async {
+                                let db = store::open_db().await.ok()?;
+                                store::load_session_summaries(&db).await.ok()
+                            },
+                            |opt| Message::CameraSessionsLoaded(opt.unwrap_or_default()),
+                        );
+                    }
+                }
+                self.camera_mode = mode;
+                Task::none()
+            }
+            Message::CameraSessionsLoaded(sessions) => {
+                self.camera_sessions = sessions;
+                self.camera_sessions_loading = false;
+                // If AppendTo still has empty sid, default to first session
+                if let CameraSessionMode::AppendTo(ref sid) = self.camera_mode {
+                    if sid.is_empty() {
+                        if let Some(first) = self.camera_sessions.first() {
+                            js_interop::save_camera_append_session(&first.session_id);
+                            self.camera_mode = CameraSessionMode::AppendTo(first.session_id.clone());
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::CameraCapture => {
+                if self.camera_capturing { return Task::none(); }
+                self.camera_capturing = true;
+                self.camera_error = None;
+                Task::future(async {
+                    Message::CameraCaptured(js_interop::capture_photo().await)
+                })
+            }
+            Message::CameraCaptured(result) => {
+                self.camera_capturing = false;
+                match result {
+                    Ok(entry) => { self.camera_queue.push(entry); }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("denied") || msg.contains("NotAllowed") {
+                            self.camera_error = Some("Camera permission denied. Please allow camera access in your browser.".into());
+                        } else {
+                            self.camera_error = Some(format!("Capture failed: {msg}"));
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::CameraRemoveCapture(idx) => {
+                if idx < self.camera_queue.len() {
+                    self.camera_queue.remove(idx);
+                }
+                Task::none()
+            }
+            Message::CameraStartAnalysis => {
+                log::info!("[camera] CameraStartAnalysis: queue_len={}", self.camera_queue.len());
+                if self.camera_queue.is_empty() { return Task::none(); }
+                // Wrap queued photos as Upload entries and run pipeline
+                let entries: Vec<js_interop::FileEntry> = self.camera_queue.drain(..).collect();
+                log::info!("[camera] entries drained: {}", entries.len());
+                self.jobs = entries
+                    .iter()
+                    .enumerate()
+                    .map(|(id, entry)| Job {
+                        id,
+                        filename: entry.name.clone(),
+                        status: JobStatus::Queued,
+                        metrics: None,
+                    })
+                    .collect();
+                self.upload.state = State::Finished(entries);
+                self.show_pipeline = false;
+                self.selected_job = None;
+                self.intermediates.clear();
+                // Snapshot the camera mode so JobDone can route storage correctly
+                self.camera_batch_mode = Some(self.camera_mode.clone());
+                // Navigate to Analysis and kick off batch
+                self.page = Page::Analysis;
+                log::info!("[camera] firing BatchStart, jobs={} state=Finished", self.jobs.len());
+                return Task::done(Message::BatchStart);
+            }
+            Message::CameraPermissionDenied => {
+                self.camera_error = Some("Camera permission denied.".into());
+                self.camera_capturing = false;
                 Task::none()
             }
 
@@ -1569,6 +1862,17 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // ── Global portrait guard ──
+        // On mobile (width < 600px) in portrait orientation, the multi-column
+        // layouts on both Analysis and History pages are unusable. Show a full-
+        // screen rotate prompt instead of rendering broken UI.
+        // Exception: Camera page is explicitly designed for portrait phone use.
+        let is_mobile = js_interop::is_mobile();
+        let is_portrait = self.window_width < self.window_height;
+        if is_mobile && is_portrait && !matches!(self.page, Page::Camera) {
+            return self.view_portrait_prompt();
+        }
+
         // ── Title bar ──
         let favicon_handle = image::Handle::from_bytes(
             include_bytes!("../assets/favicon.png").as_slice(),
@@ -1590,55 +1894,75 @@ impl App {
         .style(theme::text_button_style)
         .padding([4, 8]);
 
-        let title_bar = container(
-            row![
-                logo,
-                space::horizontal().width(Length::Fill),
+        let camera_btn: Option<Element<'_, Message>> = if js_interop::is_mobile() {
+            Some(
                 tooltip(
-                    button(text(icons::ICON_HELP).font(icons::ICON_FONT).size(20))
-                        .on_press(Message::ToggleHelp)
+                    button(text(icons::ICON_PHOTO_CAMERA).font(icons::ICON_FONT).size(20))
+                        .on_press(Message::NavigateTo(Page::Camera))
                         .style(theme::text_button_style)
                         .padding(6),
-                    "Help (F1)",
+                    "Camera",
                     tooltip::Position::Bottom,
-                ).style(theme::tooltip_style),
-                tooltip(
-                    button(text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(20))
-                        .on_press(Message::NavigateTo(Page::History {
-                            panel: HistoryPanel::Records,
-                            sidebar_open: true,
-                        }))
-                        .style(theme::text_button_style)
-                        .padding(6),
-                    "History",
-                    tooltip::Position::Bottom,
-                ).style(theme::tooltip_style),
-                tooltip(
-                    button(text(icons::ICON_PALETTE).font(icons::ICON_FONT).size(20))
-                        .on_press(Message::SwitchTheme)
-                        .style(theme::text_button_style)
-                        .padding(6),
-                    self.theme_variant.label(),
-                    tooltip::Position::Bottom,
-                ).style(theme::tooltip_style),
-                tooltip(
-                    button(
-                        image(image::Handle::from_bytes(
-                            include_bytes!("../assets/github-mark-white.png").as_slice(),
-                        ))
-                        .width(20)
-                        .height(20),
-                    )
-                    .on_press(Message::OpenGitHub)
+                ).style(theme::tooltip_style).into()
+            )
+        } else {
+            None
+        };
+
+        let mut title_row = row![
+            logo,
+            space::horizontal().width(Length::Fill),
+        ].spacing(8).align_y(iced::Alignment::Center);
+
+        if let Some(btn) = camera_btn {
+            title_row = title_row.push(btn);
+        }
+
+        title_row = title_row
+            .push(tooltip(
+                button(text(icons::ICON_HELP).font(icons::ICON_FONT).size(20))
+                    .on_press(Message::ToggleHelp)
                     .style(theme::text_button_style)
                     .padding(6),
-                    "GitHub Repository",
-                    tooltip::Position::Bottom,
-                ).style(theme::tooltip_style),
-            ]
-            .spacing(8)
-            .padding([14, 20])
-            .align_y(iced::Alignment::Center),
+                "Help (F1)",
+                tooltip::Position::Bottom,
+            ).style(theme::tooltip_style))
+            .push(tooltip(
+                button(text(icons::ICON_HISTORY).font(icons::ICON_FONT).size(20))
+                    .on_press(Message::NavigateTo(Page::History {
+                        panel: HistoryPanel::Records,
+                        sidebar_open: true,
+                    }))
+                    .style(theme::text_button_style)
+                    .padding(6),
+                "History",
+                tooltip::Position::Bottom,
+            ).style(theme::tooltip_style))
+            .push(tooltip(
+                button(text(icons::ICON_PALETTE).font(icons::ICON_FONT).size(20))
+                    .on_press(Message::SwitchTheme)
+                    .style(theme::text_button_style)
+                    .padding(6),
+                self.theme_variant.label(),
+                tooltip::Position::Bottom,
+            ).style(theme::tooltip_style))
+            .push(tooltip(
+                button(
+                    image(image::Handle::from_bytes(
+                        include_bytes!("../assets/github-mark-white.png").as_slice(),
+                    ))
+                    .width(20)
+                    .height(20),
+                )
+                .on_press(Message::OpenGitHub)
+                .style(theme::text_button_style)
+                .padding(6),
+                "GitHub Repository",
+                tooltip::Position::Bottom,
+            ).style(theme::tooltip_style));
+
+        let title_bar = container(
+            title_row.padding([14, 20]),
         )
         .style(theme::title_bar_style)
         .width(Length::Fill);
@@ -1647,6 +1971,7 @@ impl App {
         let page_content: Element<'_, Message> = match &self.page {
             Page::Analysis => self.view_analysis(),
             Page::History { panel, sidebar_open } => self.view_history(panel, *sidebar_open),
+            Page::Camera => self.view_camera(),
         };
 
         let mut main_layout = column![
@@ -1699,7 +2024,7 @@ impl App {
         if self.show_help {
             let help_layer = match &self.page {
                 Page::Analysis => ui::help_overlay::view_analysis_help(),
-                Page::History { .. } => ui::help_overlay::view_history_help(),
+                Page::History { .. } | Page::Camera => ui::help_overlay::view_history_help(),
             };
             layers = layers.push(help_layer);
         }
@@ -1707,12 +2032,279 @@ impl App {
         layers.into()
     }
 
+    /// Full-screen portrait lock overlay.
+    ///
+    /// Shown on mobile devices (width < 600px) when held in portrait mode.
+    /// Both the Analysis and History layouts require horizontal space and are
+    /// unusable in portrait, so we gate the entire app behind this prompt.
+    fn view_portrait_prompt(&self) -> Element<'_, Message> {
+        container(
+            column![
+                text(icons::ICON_SCREEN_ROTATION)
+                    .font(icons::ICON_FONT)
+                    .size(64),
+                text("Please rotate your device")
+                    .size(24),
+                text("PineappleHub works best in landscape mode")
+                    .size(15)
+                    .color(Color { a: 0.55, ..theme::text_primary() }),
+            ]
+            .spacing(16)
+            .align_x(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center(Length::Fill)
+        .style(theme::overlay_style)
+        .into()
+    }
+
+    /// Camera capture page — mobile-only full-screen capture interface.
+    fn view_camera(&self) -> Element<'_, Message> {
+        use iced::widget::{button, column, row, scrollable, text};
+
+        let accent = theme::accent();
+
+        // ── Session mode selector ──
+        let mode_btn = |label: &'static str, icon: &'static str,
+                        mode: CameraSessionMode| -> Element<'_, Message> {
+            let is_selected = match (&self.camera_mode, &mode) {
+                (CameraSessionMode::NewSession, CameraSessionMode::NewSession) => true,
+                (CameraSessionMode::AppendTo(_), CameraSessionMode::AppendTo(_)) => true,
+                (CameraSessionMode::Standalone, CameraSessionMode::Standalone) => true,
+                _ => false,
+            };
+            let bg_color = if is_selected {
+                Color { a: 0.20, ..accent }
+            } else {
+                Color::TRANSPARENT
+            };
+            let border_color = if is_selected { accent } else {
+                Color { a: 0.30, ..theme::text_primary() }
+            };
+            container(
+                button(
+                    column![
+                        text(icon).font(icons::ICON_FONT).size(22),
+                        text(label).size(12),
+                    ]
+                    .spacing(4)
+                    .align_x(iced::Alignment::Center),
+                )
+                .on_press(Message::CameraSessionModeChanged(mode))
+                .style(theme::text_button_style)
+                .padding([10, 16]),
+            )
+            .style(move |_theme: &iced::Theme| iced::widget::container::Style {
+                background: Some(iced::Background::Color(bg_color)),
+                border: iced::Border {
+                    color: border_color,
+                    width: 1.5,
+                    radius: 10.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+        };
+
+        let session_row = row![
+            mode_btn("New Session", icons::ICON_ADD_BOX, CameraSessionMode::NewSession),
+            mode_btn("Append", icons::ICON_HISTORY, CameraSessionMode::AppendTo(String::new())),
+            mode_btn("Standalone", icons::ICON_PHOTO_CAMERA, CameraSessionMode::Standalone),
+        ]
+        .spacing(12);
+
+        // If "Append" is selected, show the session picker below
+        let append_picker: Option<Element<'_, Message>> =
+            if let CameraSessionMode::AppendTo(ref current_sid) = self.camera_mode {
+                if self.camera_sessions_loading {
+                    Some(text("Loading sessions...").size(13).into())
+                } else if self.camera_sessions.is_empty() {
+                    Some(text("No sessions available.").size(13)
+                        .color(Color { a: 0.55, ..theme::text_primary() })
+                        .into())
+                } else {
+                    let items: Vec<Element<'_, Message>> = self.camera_sessions.iter().map(|s| {
+                        let sid = s.session_id.clone();
+                        let is_sel = *current_sid == sid;
+                        let label_color = if is_sel { accent } else { theme::text_primary() };
+                        let display_name = s.name.as_deref().unwrap_or("Unnamed");
+                        button(
+                            text(format!("{} ({} records)", display_name, s.total_count))
+                                .size(13)
+                                .color(label_color),
+                        )
+                        .on_press(Message::CameraSessionModeChanged(
+                            CameraSessionMode::AppendTo(sid)
+                        ))
+                        .style(theme::text_button_style)
+                        .padding([6, 12])
+                        .into()
+                    }).collect();
+                    Some(
+                        container(
+                            scrollable(column(items).spacing(4))
+                                .height(160)
+                        )
+                        .style(theme::section_card_style)
+                        .padding(8)
+                        .width(Length::Fill)
+                        .into()
+                    )
+                }
+            } else {
+                None
+            };
+
+        // ── Shutter button ──
+        let shutter_icon = if self.camera_capturing {
+            icons::ICON_HOURGLASS
+        } else {
+            icons::ICON_PHOTO_CAMERA
+        };
+        let shutter_label = if self.camera_capturing { "Capturing…" } else { "Take Photo" };
+        let mut shutter_btn = button(
+            column![
+                text(shutter_icon).font(icons::ICON_FONT).size(36),
+                text(shutter_label).size(14),
+            ]
+            .spacing(4)
+            .align_x(iced::Alignment::Center),
+        )
+        .style(theme::primary_button_style)
+        .padding([20, 40]);
+        if !self.camera_capturing {
+            shutter_btn = shutter_btn.on_press(Message::CameraCapture);
+        }
+
+        // ── Error message ──
+        let error_row: Option<Element<'_, Message>> = self.camera_error.as_ref().map(|e| {
+            row![
+                text(icons::ICON_WARNING).font(icons::ICON_FONT).size(14).color(theme::danger()),
+                text(e).size(13).color(theme::danger()),
+            ]
+            .spacing(6)
+            .into()
+        });
+
+        // ── Queued captures strip ──
+        let queue_strip: Option<Element<'_, Message>> = if !self.camera_queue.is_empty() {
+            let chips: Vec<Element<'_, Message>> = self.camera_queue.iter().enumerate().map(|(i, entry)| {
+                let idx = i;
+                row![
+                    text(icons::ICON_PHOTO_CAMERA).font(icons::ICON_FONT).size(13),
+                    text(&entry.name).size(12),
+                    button(text(icons::ICON_CLOSE).font(icons::ICON_FONT).size(12))
+                        .on_press(Message::CameraRemoveCapture(idx))
+                        .style(theme::text_button_style)
+                        .padding(2),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+            }).collect();
+            Some(
+                container(
+                    column![
+                        text(format!("{} photo(s) queued", self.camera_queue.len()))
+                            .size(13)
+                            .color(Color { a: 0.70, ..theme::text_primary() }),
+                        scrollable(column(chips).spacing(4)).height(100),
+                    ]
+                    .spacing(8),
+                )
+                .style(theme::section_card_style)
+                .padding(12)
+                .width(Length::Fill)
+                .into()
+            )
+        } else {
+            None
+        };
+
+        // ── Analyze button ──
+        let analyze_btn: Option<Element<'_, Message>> = if !self.camera_queue.is_empty() {
+            let mut btn = button(
+                row![
+                    text(icons::ICON_MONITORING).font(icons::ICON_FONT).size(16),
+                    text(format!(" Analyze {} Photo(s)", self.camera_queue.len())).size(15),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .style(theme::primary_button_style)
+            .padding([14, 28]);
+            btn = btn.on_press(Message::CameraStartAnalysis);
+            Some(btn.into())
+        } else {
+            None
+        };
+
+        // ── Assemble page ──
+        let mut page_col = column![
+            // Back button
+            button(
+                row![
+                    text(icons::ICON_ARROW_BACK).font(icons::ICON_FONT).size(16),
+                    text(" Back").size(14),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::NavigateTo(Page::Analysis))
+            .style(theme::text_button_style)
+            .padding([6, 0]),
+
+            // Title
+            text("Camera Capture").size(22),
+
+            // Session mode selector
+            text("Session mode").size(13).color(Color { a: 0.60, ..theme::text_primary() }),
+            session_row,
+        ]
+        .spacing(16)
+        .padding([20, 16]);
+
+        if let Some(picker) = append_picker {
+            page_col = page_col.push(picker);
+        }
+        if let Some(err) = error_row {
+            page_col = page_col.push(err);
+        }
+
+        page_col = page_col.push(
+            container(shutter_btn)
+                .width(Length::Fill)
+                .center_x(Length::Fill),
+        );
+
+        if let Some(strip) = queue_strip {
+            page_col = page_col.push(strip);
+        }
+        if let Some(analyze) = analyze_btn {
+            page_col = page_col.push(
+                container(analyze)
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+            );
+        }
+
+        container(scrollable(page_col))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|theme: &iced::Theme| iced::widget::container::Style {
+                background: Some(iced::Background::Color(crate::theme::active_palette().bg_base)),
+                ..iced::widget::container::transparent(theme)
+            })
+            .into()
+    }
+
     /// Analysis page — the original 3-column layout.
     fn view_analysis(&self) -> Element<'_, Message> {
         // ── Left column: file input + file list ──
         let mut left_col = column![].spacing(12).padding(12).width(Length::FillPortion(3));
 
-        // Buttons
+        // Buttons — file picker and (on desktop) directory picker
         let mut btn_row = row![button("Choose Files").on_press(Message::PickFiles)].spacing(8);
         if self.can_pick_directory {
             btn_row = btn_row.push(button("Choose Folder").on_press(Message::PickDirectory));

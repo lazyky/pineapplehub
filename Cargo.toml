@@ -44,6 +44,27 @@ web-sys = { version = "0.3", features = [
   "Blob",
   "BlobPropertyBag",
   "Url",
+  # Camera capture
+  "MediaDevices",
+  "MediaStream",
+  "MediaStreamConstraints",
+  "MediaTrackConstraints",
+  "HtmlVideoElement",
+  "HtmlCanvasElement",
+  "CanvasRenderingContext2d",
+  "ImageData",
+  # localStorage for camera mode persistence
+  "Storage",
+  # File input capture (camera page)
+  "File",
+  "FileReader",
+  "FileList",
+  "Event",
+  "HtmlInputElement",
+  "HtmlBodyElement",
+  # Browser-side image resize (OOM prevention)
+  "HtmlImageElement",
+  "Response",
 ] }
 
 indexed-db = "0.4"

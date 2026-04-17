@@ -1283,6 +1283,8 @@ pub(crate) enum Page {
         panel: HistoryPanel,
         sidebar_open: bool,
     },
+    /// Mobile camera capture page (only reachable on mobile devices).
+    Camera,
 }
 
 impl Default for Page {

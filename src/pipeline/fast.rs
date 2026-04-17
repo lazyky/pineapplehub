@@ -46,6 +46,7 @@ fn get_tight_bounds(
     let contours = find_contours_with_threshold(&restored, 127);
     contours
         .into_iter()
+        .filter(|c| c.points.len() >= 3)
         .max_by(|a, b| arc_length(&a.points, true).total_cmp(&arc_length(&b.points, true)))
         .map(|c| {
             let corners = min_area_rect(&c.points);
@@ -251,16 +252,24 @@ pub(crate) struct PreparedImage {
 
 /// Phase 1 — runs on **main thread** (sequentially).
 /// Decodes the image, extracts gray_hr + resized, drops the original.
-/// Peak memory: one full-res decoded image at a time (~48MB).
+/// Peak memory is minimised by dropping the full-res RGBA image
+/// before creating the resized copy.
 pub(crate) fn prepare_image(entry: &FileEntry) -> Result<PreparedImage, Error> {
     let original = ImageReader::new(Cursor::new(&entry.data))
         .with_guessed_format()
         .map_err(|e| Error::General(format!("Format detect: {e}")))?
         .decode()?;
+
+    // Extract luma and immediately free the large RGBA buffer.
     let gray_hr = original.to_luma8();
-    let resized = original.resize(1024, 1024, imageops::Lanczos3);
+    drop(original); // frees the RGBA decode (~12.6 MB at 2048px)
+
+    // Resize from the much smaller grayscale image.
+    // process_prepared() converts resized.to_rgba8() → smoothed → smoothed_luma
+    // anyway, so feeding grayscale here yields identical results.
+    let resized = DynamicImage::ImageLuma8(gray_hr.clone())
+        .resize(1024, 1024, imageops::Lanczos3);
     let scale = gray_hr.width() as f32 / resized.width() as f32;
-    // `original` is dropped here — frees ~48MB (RGBA full-res)
     Ok(PreparedImage { gray_hr, resized, scale })
 }
 
@@ -302,16 +311,16 @@ pub(crate) fn process_prepared(prep: &PreparedImage) -> Result<FruitletMetrics, 
 
     let hr_cx = roi_rect.cx * scale;
     let hr_cy = roi_rect.cy * scale;
-    let hr_w = (roi_rect.width * scale).round() as u32;
-    let hr_h = (roi_rect.height * scale).round() as u32;
+    let hr_w = (roi_rect.width * scale).round().max(1.0) as u32;
+    let hr_h = (roi_rect.height * scale).round().max(1.0) as u32;
 
     wlog!("[fast] step 5: crop+rotate HR image ({}x{}, scale={})", hr_w, hr_h, scale);
 
     let diag = ((hr_w as f32).powi(2) + (hr_h as f32).powi(2)).sqrt();
     let safe_x = (hr_cx - diag / 2.0).round() as i32;
     let safe_y = (hr_cy - diag / 2.0).round() as i32;
-    let safe_w = diag.ceil() as u32;
-    let safe_h = diag.ceil() as u32;
+    let safe_w = diag.ceil().max(1.0) as u32;
+    let safe_h = diag.ceil().max(1.0) as u32;
 
     let mut padded_crop: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(safe_w, safe_h);
     for y in 0..safe_h {
@@ -335,10 +344,18 @@ pub(crate) fn process_prepared(prep: &PreparedImage) -> Result<FruitletMetrics, 
     );
     let rot_cx = rotated_panel.width() as f32 / 2.0;
     let rot_cy = rotated_panel.height() as f32 / 2.0;
+    let rp_w = rotated_panel.width();
+    let rp_h = rotated_panel.height();
+
+    // Clamp ALL crop parameters to prevent crop_imm / SubImage panic
     let crop_x = (rot_cx - hr_w as f32 / 2.0).round().max(0.0) as u32;
     let crop_y = (rot_cy - hr_h as f32 / 2.0).round().max(0.0) as u32;
+    let crop_x = crop_x.min(rp_w.saturating_sub(1));
+    let crop_y = crop_y.min(rp_h.saturating_sub(1));
+    let clamped_w = hr_w.min(rp_w - crop_x).max(1);
+    let clamped_h = hr_h.min(rp_h - crop_y).max(1);
 
-    let warped = imageops::crop_imm(&rotated_panel, crop_x, crop_y, hr_w, hr_h).to_image();
+    let warped = imageops::crop_imm(&rotated_panel, crop_x, crop_y, clamped_w, clamped_h).to_image();
 
     wlog!("[fast] step 6: dual-axis unwrap");
     let vert_unwrapped = unwrap(&warped);
@@ -391,12 +408,18 @@ pub(crate) fn process_prepared(prep: &PreparedImage) -> Result<FruitletMetrics, 
     let roi_w = roi_gray.width();
     let roi_h = roi_gray.height();
 
-    let block_radius = (COIN_RADIUS_MM * hr_px_per_mm).round() as u32;
+    let block_radius = (COIN_RADIUS_MM * hr_px_per_mm).round().max(1.0) as u32;
     let coin_diam_px = 2.0 * COIN_RADIUS_MM * hr_px_per_mm;
     let coin_radius_px = coin_diam_px / 2.0;
     let coin_area_px = std::f32::consts::PI * coin_radius_px * coin_radius_px;
     let equator_y = roi_h as f32 / 2.0;
     let center_x = roi_w as f32 / 2.0;
+
+    // Guard: roi must have minimum dimensions for counting
+    if roi_w < 4 || roi_h < 4 {
+        wlog!("[fast] ROI too small ({}x{}), skipping fruitlet counting", roi_w, roi_h);
+        return Ok(metrics);
+    }
 
     // Step A: binary + close + fill_holes → `filled`
     let binary_fc = adaptive_threshold(&roi_gray, block_radius, 0);
@@ -453,11 +476,14 @@ pub(crate) fn process_prepared(prep: &PreparedImage) -> Result<FruitletMetrics, 
                 for (x, y, px) in labels.enumerate_pixels() {
                     if px.0[0] == label { pts.push(Point::new(x as i32, y as i32)); }
                 }
-                let rect = min_area_rect(&pts);
-                let (major, minor, angle) = compute_fruitlet_rect(&rect);
-                if major > 0.0 {
-                    eye_rect = Some((rect, major, minor, angle));
-                    break;
+                // min_area_rect requires at least 3 points
+                if pts.len() >= 3 {
+                    let rect = min_area_rect(&pts);
+                    let (major, minor, angle) = compute_fruitlet_rect(&rect);
+                    if major > 0.0 {
+                        eye_rect = Some((rect, major, minor, angle));
+                        break;
+                    }
                 }
             }
 

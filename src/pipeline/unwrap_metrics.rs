@@ -47,15 +47,15 @@ fn get_tight_bounds(
     let restored = imageops::resize(&opened, w, h, imageops::FilterType::Nearest);
 
     let contours = find_contours_with_threshold(&restored, 127);
-    if let Some(longest) = contours
+    contours
         .into_iter()
+        .filter(|c| c.points.len() >= 3)
         .max_by(|a, b| arc_length(&a.points, true).total_cmp(&arc_length(&b.points, true)))
-    {
-        let corners = min_area_rect(&longest.points);
-        Some((corners, longest.points))
-    } else {
-        None
-    }
+        .map(|c| {
+            let corners = min_area_rect(&c.points);
+            Some((corners, c.points))
+        })
+        .flatten()
 }
 
 /// Extracts rect metrics (major/minor lengths, angle, center) from min_area_rect box points.
@@ -441,12 +441,20 @@ pub(crate) fn process_binary_fusion(
         let crop_x = (rot_center_x - hr_w as f32 / 2.0).round() as i32;
         let crop_y = (rot_center_y - hr_h as f32 / 2.0).round() as i32;
 
+        // Clamp crop parameters to rotated_panel bounds
+        let rp_w = rotated_panel.width();
+        let rp_h = rotated_panel.height();
+        let crop_x = crop_x.max(0).min(rp_w.saturating_sub(1) as i32) as u32;
+        let crop_y = crop_y.max(0).min(rp_h.saturating_sub(1) as i32) as u32;
+        let clamped_w = hr_w.min(rp_w - crop_x).max(1);
+        let clamped_h = hr_h.min(rp_h - crop_y).max(1);
+
         let warped = imageops::crop_imm(
             &rotated_panel,
-            crop_x.max(0) as u32,
-            crop_y.max(0) as u32,
-            hr_w,
-            hr_h,
+            crop_x,
+            crop_y,
+            clamped_w,
+            clamped_h,
         )
         .to_image();
 

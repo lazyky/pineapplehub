@@ -248,6 +248,9 @@ pub(crate) fn extract_best_roi(
     if let Some(best) = group_scores.first() {
         // The winning group's low-threshold contour IS the bounding contour
         let best_lc = outer_low[best.low_contour_idx];
+        if best_lc.points.len() < 3 {
+            return Err(Error::General("Best ROI contour has too few points".into()));
+        }
         let rect = min_area_rect(&best_lc.points);
         let r_rect = get_rotated_rect_info(&rect);
 

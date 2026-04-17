@@ -22,6 +22,45 @@ trunk serve --release
 
 > **Note:** The app requires `SharedArrayBuffer` for Rayon-based parallel processing. Trunk is configured to serve the necessary COOP/COEP headers via `Trunk.toml`.
 
+## Mobile Development & Camera Testing
+
+The camera capture feature (`Page::Camera`) uses `<input type="file" capture="environment">` and
+requires the page to be served over **HTTPS** (or `localhost`) for `getUserMedia` and secure-context
+APIs to be available.
+
+### Option A — HTTPS with self-signed certificate (recommended for LAN testing)
+
+1. Generate a certificate valid for your LAN IP (replace `192.168.x.x` with yours):
+
+   ```bash
+   openssl req -x509 -newkey rsa:2048 -keyout localhost.key \
+     -out localhost.crt -days 365 -nodes -subj "/CN=192.168.x.x" \
+     -addext "subjectAltName=IP:192.168.x.x,IP:127.0.0.1,DNS:localhost"
+   ```
+
+2. Start trunk with TLS:
+
+   ```bash
+   trunk serve -a 0.0.0.0 --release -p 8443 \
+     --tls-key-path localhost.key \
+     --tls-cert-path localhost.crt
+   ```
+
+3. On the phone, open `https://192.168.x.x:8443`. When warned about the untrusted
+   certificate, tap **Advanced → Proceed**. The camera button will then work.
+
+> **Note:** `localhost.key` and `localhost.crt` are excluded from version control
+> via `.gitignore`. Regenerate them each time you need to test on a new device or
+> after the cert expires.
+
+### Option B — ngrok tunnel
+
+```bash
+ngrok http 8081
+```
+
+Use the `https://…ngrok.io` URL on the phone. No certificate setup needed.
+
 ## Project Structure
 
 ```

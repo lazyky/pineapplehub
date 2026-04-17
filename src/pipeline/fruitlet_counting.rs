@@ -220,7 +220,7 @@ pub(crate) fn process_fruitlet_counting(
     let roi_h = roi_gray.height();
 
     // --- Step 1: Adaptive threshold on the ROI ---
-    let block_radius = (COIN_RADIUS_MM * hr_px_per_mm).round() as u32;
+    let block_radius = (COIN_RADIUS_MM * hr_px_per_mm).round().max(1.0) as u32;
     let delta = 0_i32;
     let binary = adaptive_threshold(&roi_gray, block_radius, delta);
 
@@ -310,18 +310,21 @@ pub(crate) fn process_fruitlet_counting(
                     pts.push(Point::new(x as i32, y as i32));
                 }
             }
-            let rect = min_area_rect(&pts);
-            let (major, minor, angle) = compute_rect_metrics(&rect);
-            if major > 0.0 {
-                let cx = (sx / area as f64) as f32;
-                let cy = (sy / area as f64) as f32;
-                log::info!(
-                    "[FruitletCounting] Eye CC found at open_r={}: centroid=({:.0},{:.0}), major={:.1}px ({:.1}mm), minor={:.1}px ({:.1}mm), area={} ({:.2}× coin), score={:.2}",
-                    open_r, cx, cy, major, major * mm_per_px, minor, minor * mm_per_px, area, area as f32 / coin_area_px, best_open_score,
-                );
-                eye_rect = Some((rect, major, minor, angle));
-                eye_centroid = (cx as u32, cy as u32);
-                break;
+            // min_area_rect requires at least 3 points
+            if pts.len() >= 3 {
+                let rect = min_area_rect(&pts);
+                let (major, minor, angle) = compute_rect_metrics(&rect);
+                if major > 0.0 {
+                    let cx = (sx / area as f64) as f32;
+                    let cy = (sy / area as f64) as f32;
+                    log::info!(
+                        "[FruitletCounting] Eye CC found at open_r={}: centroid=({:.0},{:.0}), major={:.1}px ({:.1}mm), minor={:.1}px ({:.1}mm), area={} ({:.2}× coin), score={:.2}",
+                        open_r, cx, cy, major, major * mm_per_px, minor, minor * mm_per_px, area, area as f32 / coin_area_px, best_open_score,
+                    );
+                    eye_rect = Some((rect, major, minor, angle));
+                    eye_centroid = (cx as u32, cy as u32);
+                    break;
+                }
             }
         } else {
             let n_valid = regions.values().filter(|(a,_,_)| {

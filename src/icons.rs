@@ -31,6 +31,7 @@ pub(crate) const ICON_CHEVRON_LEFT: &str = "\u{E408}";     // chevron_left
 pub(crate) const ICON_CHEVRON_RIGHT: &str = "\u{E409}";    // chevron_right
 pub(crate) const ICON_ARROW_UPWARD: &str = "\u{E5D8}";     // arrow_upward
 pub(crate) const ICON_ARROW_DOWNWARD: &str = "\u{E5DB}";   // arrow_downward
+pub(crate) const ICON_ARROW_BACK: &str = "\u{E5C4}";       // arrow_back
 pub(crate) const ICON_UNFOLD_MORE: &str = "\u{E5D7}";      // unfold_more (sortable hint)
 
 pub(crate) const ICON_SEARCH: &str = "\u{E8B6}";           // search
@@ -67,8 +68,11 @@ pub(crate) const ICON_HOURGLASS_TOP: &str = "\u{EA5B}";    // hourglass_top (dec
 pub(crate) const ICON_SYNC: &str = "\u{E627}";             // sync (processing)
 
 // ── Statistics & Charts ──
-pub(crate) const ICON_BAR_CHART: &str = "\u{E26B}";        // bar_chart
-pub(crate) const ICON_MONITORING: &str = "\u{F190}";        // monitoring (dashboard card)
-pub(crate) const ICON_QUERY_STATS: &str = "\u{E4FC}";      // query_stats (outlier rate)
+pub(crate) const ICON_BAR_CHART: &str = "\u{E26B}";           // bar_chart
+pub(crate) const ICON_MONITORING: &str = "\u{F190}";           // monitoring (dashboard card)
+pub(crate) const ICON_QUERY_STATS: &str = "\u{E4FC}";         // query_stats (outlier rate)
 
-
+// ── Mobile / Camera ──
+pub(crate) const ICON_PHOTO_CAMERA: &str = "\u{E412}";        // photo_camera
+pub(crate) const ICON_SCREEN_ROTATION: &str = "\u{EBEE}";     // screen_rotation_alt
+pub(crate) const ICON_ADD_BOX: &str = "\u{E146}";              // add_box

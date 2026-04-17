@@ -135,6 +135,72 @@ pub(crate) async fn save_session(
     Ok(())
 }
 
+/// Append new records to an existing session and update its aggregate counts.
+///
+/// Used by the Camera page "Append to existing session" mode.  
+/// If the session does not exist the function returns `Ok(())` silently
+/// (the records are still written, so no data is lost).
+pub(crate) async fn append_to_session(
+    db: &Db,
+    session_id: &str,
+    new_records: &[AnalysisRecord],
+) -> StoreResult<()> {
+    if new_records.is_empty() {
+        return Ok(());
+    }
+
+    log::info!(
+        "append_to_session: appending {} records to session {}",
+        new_records.len(),
+        session_id
+    );
+
+    // Transaction 1: write the new records
+    let records_js: Vec<JsValue> = new_records.iter().map(|r| to_js(r)).collect();
+    let record_count = records_js.len();
+    db.transaction(&[RECORDS_STORE])
+        .rw()
+        .run(move |t| async move {
+            let store = t.object_store(RECORDS_STORE)?;
+            for (i, val) in records_js.iter().enumerate() {
+                store.put(val).await?;
+                if (i + 1) % 50 == 0 || i + 1 == record_count {
+                    log::info!("append_to_session: {}/{} records written", i + 1, record_count);
+                }
+            }
+            Ok(())
+        })
+        .await?;
+
+    // Transaction 2: patch the session meta (total_count, success_count, failed_count)
+    let sid_new = new_records
+        .iter()
+        .filter(|r| r.metrics.major_length > 0.0)
+        .count() as u32;
+    let sid_failed = (new_records.len() as u32).saturating_sub(sid_new);
+    let key = JsValue::from_str(session_id);
+    db.transaction(&[SESSIONS_STORE])
+        .rw()
+        .run(move |t| async move {
+            let store = t.object_store(SESSIONS_STORE)?;
+            if let Some(val) = store.get(&key).await? {
+                if let Some(mut meta) = from_js::<SessionMeta>(val) {
+                    meta.total_count   += sid_new + sid_failed;
+                    meta.success_count += sid_new;
+                    meta.failed_count  += sid_failed;
+                    store.put(&to_js(&meta)).await?;
+                    log::info!(
+                        "append_to_session: meta updated — total={}", meta.total_count
+                    );
+                }
+            }
+            Ok(())
+        })
+        .await?;
+
+    Ok(())
+}
+
 /// Update a single record (e.g., after editing metrics, toggling suspect, or adding a note).
 pub(crate) async fn update_record(
     db: &Db,

@@ -63,8 +63,16 @@ pub(crate) fn perform_scale_calibration(
             continue;
         }
 
+        // Need at least 3 points for convex_hull / min_area_rect
+        if contour.points.len() < 3 {
+            continue;
+        }
+
         // Convex hull repairs edge defects (stains, dirt) by bridging concavities
         let hull = convex_hull(contour.points.clone());
+        if hull.len() < 3 {
+            continue;
+        }
         let hull_area = geometry_contour_area(&hull).abs() as f32;
 
         let rect = min_area_rect(&hull);

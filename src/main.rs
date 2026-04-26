@@ -2618,8 +2618,9 @@ impl App {
         }
 
         // Results table header
+        let table_width = f32::max(600.0, self.window_width * 0.5 - 40.0);
         let header = row![
-            tip_hdr("File", "Source image filename", 3),
+            tip_hdr("File", "Source image filename", 4),
             tip_hdr("H", MetricColumn::Height.description(), 1),
             tip_hdr("D", MetricColumn::Width.description(), 1),
             tip_hdr("V", MetricColumn::Volume.description(), 1),
@@ -2629,23 +2630,24 @@ impl App {
             tip_hdr("Nf", MetricColumn::NTotal.description(), 1),
         ]
         .spacing(4);
-        right_col = right_col.push(container(header).style(theme::table_header_style).padding([8, 6]));
+        let header_container = container(header).style(theme::table_header_style).padding([8, 6]).width(Length::Fixed(table_width));
 
         // Show ALL jobs (done = metrics, error = dashes, others = hidden until done)
         let finished_jobs: Vec<&Job> = self.jobs.iter()
             .filter(|j| matches!(j.status, JobStatus::Done | JobStatus::Error(_)))
             .collect();
 
-        if finished_jobs.is_empty() {
+        let table_content = if finished_jobs.is_empty() {
             let pending = self.jobs.iter().any(|j| {
                 matches!(j.status, JobStatus::Queued | JobStatus::Processing)
             });
             let placeholder = if pending { "Analyzing…" } else { "No results yet" };
-            right_col = right_col.push(
+            column![
+                header_container,
                 container(text(placeholder).color(Color { a: 0.55, ..theme::text_primary() }))
-                    .center(Length::Fill)
-                    .padding(20),
-            );
+                    .center(Length::Fixed(table_width))
+                    .padding(20)
+            ]
         } else {
             let rows = column(finished_jobs.iter().enumerate().map(|(idx, job)| {
                 let row_bg = theme::table_row_bg(idx, false, false);
@@ -2654,7 +2656,7 @@ impl App {
                 if let Some(m) = &job.metrics {
                     container(
                         row![
-                            text(&job.filename).size(13).width(Length::FillPortion(3)),
+                            text(&job.filename).size(13).width(Length::FillPortion(4)),
                             text(format!("{:.1}", m.major_length)).size(13).width(Length::FillPortion(1)),
                             text(format!("{:.1}", m.minor_length)).size(13).width(Length::FillPortion(1)),
                             text(format!("{:.0}", m.volume)).size(13).width(Length::FillPortion(1)),
@@ -2668,12 +2670,13 @@ impl App {
                     )
                     .style(row_bg)
                     .padding([6, 6])
+                    .width(Length::Fixed(table_width))
                     .into()
                 } else {
                     // Failed job: red filename + dash placeholders
                     container(
                         row![
-                            text(&job.filename).size(13).width(Length::FillPortion(3))
+                            text(&job.filename).size(13).width(Length::FillPortion(4))
                                 .color(theme::danger()),
                             dash(), dash(), dash(), dash(), dash(), dash(), dash(),
                         ]
@@ -2682,12 +2685,24 @@ impl App {
                     )
                     .style(row_bg)
                     .padding([6, 6])
+                    .width(Length::Fixed(table_width))
                     .into()
                 }
             }))
             .spacing(1);
-            right_col = right_col.push(scrollable(rows));
-        }
+            
+            column![
+                header_container,
+                scrollable(rows)
+            ]
+        };
+
+        right_col = right_col.push(
+            scrollable(table_content)
+                .direction(iced::widget::scrollable::Direction::Horizontal(
+                    iced::widget::scrollable::Scrollbar::new()
+                ))
+        );
 
         let has_done = self.jobs.iter().any(|j| j.status == JobStatus::Done);
         if has_done {
